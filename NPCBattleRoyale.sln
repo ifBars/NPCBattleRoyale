@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36408.4 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NPCBattleRoyale", "NPCBattleRoyale.csproj", "{FDA46502-270C-41BF-AC10-5D0ABAAB0D4A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Il2cpp|Any CPU = Il2cpp|Any CPU
+		Mono|Any CPU = Mono|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FDA46502-270C-41BF-AC10-5D0ABAAB0D4A}.Il2cpp|Any CPU.ActiveCfg = Il2cpp|Any CPU
+		{FDA46502-270C-41BF-AC10-5D0ABAAB0D4A}.Il2cpp|Any CPU.Build.0 = Il2cpp|Any CPU
+		{FDA46502-270C-41BF-AC10-5D0ABAAB0D4A}.Mono|Any CPU.ActiveCfg = Mono|Any CPU
+		{FDA46502-270C-41BF-AC10-5D0ABAAB0D4A}.Mono|Any CPU.Build.0 = Mono|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {8C5214A5-9B61-4582-825A-D558D6E2E089}
+	EndGlobalSection
+EndGlobal
