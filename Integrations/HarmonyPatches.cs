@@ -1,7 +1,7 @@
 ﻿#if MONO
-using ScheduleOne;
+using ScheduleOne.NPCs;
 #else
-using Il2CppScheduleOne;
+using Il2CppScheduleOne.NPCs;
 #endif
 using HarmonyLib;
 using NPCBattleRoyale.BattleRoyale;
@@ -22,23 +22,13 @@ namespace NPCBattleRoyale.Integrations
             EnsureManager();
         }
 
-#if MONO
         [HarmonyPostfix]
-        [HarmonyPatch(typeof(ScheduleOne.NPCs.NPC), nameof(ScheduleOne.NPCs.NPC.Start))]
-        private static void NPC_Start_Postfix_Mono(ScheduleOne.NPCs.NPC __instance)
+        [HarmonyPatch(typeof(NPC), nameof(NPC.Start))]
+        private static void NPC_Start_Postfix_Mono(NPC __instance)
         {
             EnsureManager();
             BattleRoyaleManager.Instance?.OnNPCStart(__instance);
         }
-#else
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(Il2CppScheduleOne.NPCs.NPC), nameof(Il2CppScheduleOne.NPCs.NPC.Start))]
-        private static void NPC_Start_Postfix_Il2cpp(Il2CppScheduleOne.NPCs.NPC __instance)
-        {
-            EnsureManager();
-            BattleRoyaleManager.Instance?.OnNPCStart(__instance);
-        }
-#endif
 
         private static void EnsureManager()
         {

@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace NPCBattleRoyale.Utils
+﻿namespace NPCBattleRoyale.Utils
 {
     public static class Constants
     {

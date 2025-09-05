@@ -899,10 +899,23 @@
 	<ItemGroup>
 	  <Compile Include="BattleRoyale\BattleRoyaleManager.cs" />
 	  <Compile Include="BattleRoyale\ArenaDefinition.cs" />
+	  <Compile Include="BattleRoyale\GroupDefinition.cs" />
+	  <Compile Include="BattleRoyale\Pages\ConfigPageBase.cs" />
+	  <Compile Include="BattleRoyale\Pages\PresetsPage.cs" />
+	  <Compile Include="BattleRoyale\Pages\SettingsPage.cs" />
+	  <Compile Include="BattleRoyale\Pages\SetupPage.cs" />
+	  <Compile Include="BattleRoyale\RoundSettings.cs" />
 	  <Compile Include="BattleRoyale\RoundState.cs" />
+	  <Compile Include="BattleRoyale\TournamentManager.cs" />
+	  <Compile Include="BattleRoyale\ConfigPanel.cs" />
 	  <Compile Include="Core.cs" />
 	  <Compile Include="Integrations\HarmonyPatches.cs" />
 	  <Compile Include="Utils\Constants.cs" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Reference Include="bGUI">
+	    <HintPath>..\bGUI\bin\Release\netstandard2.1\bGUI.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 
 	<PropertyGroup>
