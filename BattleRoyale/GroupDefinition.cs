@@ -20,6 +20,9 @@ namespace NPCBattleRoyale.BattleRoyale
         public string Name = "Group";
         // Explicit list of NPC IDs in this group
         public List<string> NPCIDs = new List<string>();
+        // Optional: Regions by name (e.g., "Westville", "Northtown")
+        // Preferred way to group NPCs; matches NPC.Region.ToString()
+        public List<string> Regions = new List<string>();
         // Optional: include any NPC whose ID contains one of these case-insensitive terms
         public List<string> IdContainsAny = new List<string>();
         // Optional: exclude specific NPC IDs
@@ -60,7 +63,16 @@ namespace NPCBattleRoyale.BattleRoyale
                 {
                     var json = File.ReadAllText(GroupsFilePath);
                     var groups = JsonConvert.DeserializeObject<List<GroupDefinition>>(json);
-                    return groups ?? new List<GroupDefinition>();
+                    groups = groups ?? new List<GroupDefinition>();
+                    // Back-compat: ensure Regions list exists
+                    for (int i = 0; i < groups.Count; i++)
+                    {
+                        if (groups[i].Regions == null) groups[i].Regions = new List<string>();
+                        if (groups[i].NPCIDs == null) groups[i].NPCIDs = new List<string>();
+                        if (groups[i].IdContainsAny == null) groups[i].IdContainsAny = new List<string>();
+                        if (groups[i].ExcludeNPCIDs == null) groups[i].ExcludeNPCIDs = new List<string>();
+                    }
+                    return groups;
                 }
             }
             catch (Exception ex)
@@ -72,14 +84,15 @@ namespace NPCBattleRoyale.BattleRoyale
 
         private static List<GroupDefinition> CreateDefaultGroups()
         {
-            // Ship a few sample groups using ID substring rules. Users can edit JSON to refine.
+            // Ship a few sample groups using Region names for accurate selection.
             return new List<GroupDefinition>
             {
-                new GroupDefinition { Name = "Westville", IdContainsAny = new List<string>{ "westville" } },
-                new GroupDefinition { Name = "Northtown", IdContainsAny = new List<string>{ "north" , "northtown" } },
-                new GroupDefinition { Name = "Warehouse", IdContainsAny = new List<string>{ "warehouse" } },
-                new GroupDefinition { Name = "Suppliers", IdContainsAny = new List<string>{ "supplier" } },
-                new GroupDefinition { Name = "Dealers", IdContainsAny = new List<string>{ "dealer" } },
+                new GroupDefinition { Name = "Westville", Regions = new List<string>{ "Westville" } },
+                new GroupDefinition { Name = "Northtown", Regions = new List<string>{ "Northtown" } },
+                new GroupDefinition { Name = "Downtown", Regions = new List<string>{ "Downtown" } },
+                new GroupDefinition { Name = "Docks", Regions = new List<string>{ "Docks" } },
+                new GroupDefinition { Name = "Suburbia", Regions = new List<string>{ "Suburbia" } },
+                new GroupDefinition { Name = "Uptown", Regions = new List<string>{ "Uptown" } },
             };
         }
 
@@ -87,6 +100,7 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             if (npc == null) return false;
             var id = npc.ID ?? string.Empty;
+            var regionName = npc.Region.ToString();
             // Explicit ID include wins
             for (int i = 0; i < group.NPCIDs.Count; i++)
             {
@@ -98,6 +112,19 @@ namespace NPCBattleRoyale.BattleRoyale
             {
                 if (string.Equals(group.ExcludeNPCIDs[i], id, StringComparison.OrdinalIgnoreCase))
                     return false;
+            }
+            // Region name match (preferred)
+            for (int i = 0; i < group.Regions.Count; i++)
+            {
+                string r = group.Regions[i];
+                if (!string.IsNullOrWhiteSpace(r) && string.Equals(r, regionName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            // Back-compat: if no Regions defined, match by group name against region
+            if (group.Regions == null || group.Regions.Count == 0)
+            {
+                if (string.Equals(group.Name, regionName, StringComparison.OrdinalIgnoreCase))
+                    return true;
             }
             // Substring match
             for (int i = 0; i < group.IdContainsAny.Count; i++)

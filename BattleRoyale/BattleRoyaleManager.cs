@@ -36,8 +36,8 @@ namespace NPCBattleRoyale.BattleRoyale
                 Name = "Chemical Station",
                 Center = new Vector3(-109.745f, -2.935f, 92.271f),
                 Radius = 10f,
-                GateLocalPositions = new [] { new Vector3(-2.8767f, 0.0f, -7.1238f) },
-                GateLocalEulerAngles = new [] { new Vector3(0f, 20f, 0f) },
+                GateLocalPositions = new [] { new Vector3(-2.8767f, 0.0f, -7.1238f), new Vector3(7.0f, 0.0f, 4.0f) },
+                GateLocalEulerAngles = new [] { new Vector3(0f, 20f, 0f), new Vector3(0f, 90f, 0f) },
                 PanelLocalOffset = new Vector3(0.4666f, 3.4786f, 10.2059f)
             }
         };
@@ -46,7 +46,7 @@ namespace NPCBattleRoyale.BattleRoyale
         public RoundState State { get; set; } = RoundState.Idle;
         public string[] IgnoredNPCIDs = new string[]
         {
-            "thomas_benzies", "uncle_nelson", "cartelgoon3", "cartelgoon1", "cartelgoon", "cartelgoon2", "cartelgoon4", "cartelgoon5", "igor_romanovich_door", "officercooper", "officerbailey"
+            "thomas_benzies", "uncle_nelson", "cartelgoon3", "cartelgoon1", "cartelgoon", "cartelgoon2", "cartelgoon4", "cartelgoon5", "igor_romanovich_door",
         };
 
         private readonly List<NPC> _roundNPCs = new List<NPC>();
@@ -54,6 +54,9 @@ namespace NPCBattleRoyale.BattleRoyale
         private GameObject _panelRoot;
         private readonly Dictionary<NPC, UnityAction> _deathHandlers = new Dictionary<NPC, UnityAction>();
         private readonly Dictionary<NPC, UnityAction> _koHandlers = new Dictionary<NPC, UnityAction>();
+        private readonly List<NPC> _stagedWinners = new List<NPC>();
+        private readonly HashSet<NPC> _activeParticipants = new HashSet<NPC>();
+        public bool ExternalControlActive { get; private set; }
 
         private Material CreateVisibleMaterial(Color color)
         {
@@ -153,6 +156,48 @@ namespace NPCBattleRoyale.BattleRoyale
             }
         }
 
+        /// <summary>
+        /// Set the explicit list of active participants for pairing/aggression.
+        /// </summary>
+        public void SetActiveParticipants(IEnumerable<NPC> participants)
+        {
+            _activeParticipants.Clear();
+            foreach (var p in participants)
+            {
+                if (p != null) _activeParticipants.Add(p);
+            }
+        }
+
+        public void ClearActiveParticipants() => _activeParticipants.Clear();
+
+        public void SetExternalControl(bool active) => ExternalControlActive = active;
+
+        public List<NPC> GetActiveParticipantsAlive()
+        {
+            var alive = new List<NPC>();
+            foreach (var p in _activeParticipants)
+            {
+                if (p == null || p.Health == null) continue;
+                if (p.Health.IsDead || p.Health.IsKnockedOut) continue;
+                alive.Add(p);
+            }
+            return alive;
+        }
+
+        /// <summary>
+        /// Pair and aggro only within the explicitly set active participants.
+        /// </summary>
+        public void PairAndAggroActiveParticipants()
+        {
+            var list = GetActiveParticipantsAlive();
+            for (int i = 0; i < list.Count; i++)
+            {
+                var self = list[i];
+                var target = list[(i + 1) % Mathf.Max(1, list.Count)];
+                ForceCombat(self, target);
+            }
+        }
+
         public void ToggleGates()
         {
             bool anyActive = _gates.Exists(g => g != null && g.activeSelf);
@@ -188,7 +233,12 @@ namespace NPCBattleRoyale.BattleRoyale
             if (string.IsNullOrEmpty(id)) return false;
             for (int i = 0; i < IgnoredNPCIDs.Length; i++)
             {
-                if (string.Equals(IgnoredNPCIDs[i], id, StringComparison.OrdinalIgnoreCase)) return true;
+                // Use both exact match and substring match for better detection
+                if (string.Equals(IgnoredNPCIDs[i], id, StringComparison.OrdinalIgnoreCase) ||
+                    id.IndexOf(IgnoredNPCIDs[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
             }
             return false;
         }
@@ -213,29 +263,22 @@ namespace NPCBattleRoyale.BattleRoyale
             }
         }
 
-        private void ForceCombat(NPC a, NPC b)
+        public void ForceCombat(NPC a, NPC b)
         {
             if (a == null || b == null) return;
             try
             {
-                // Reduce unwanted behaviours targeting player
-                if (a.Behaviour != null)
-                {
-                    SafeDisable(a.Behaviour.FleeBehaviour);
-                    SafeDisable(a.Behaviour.CallPoliceBehaviour);
-                    SafeDisable(a.Behaviour.StationaryBehaviour);
-                }
-                if (b.Behaviour != null)
-                {
-                    SafeDisable(b.Behaviour.FleeBehaviour);
-                    SafeDisable(b.Behaviour.CallPoliceBehaviour);
-                    SafeDisable(b.Behaviour.StationaryBehaviour);
-                }
-                // Ensure CombatBehaviour references exist (some NPCs may not have it assigned)
+                // Comprehensive behavior management for both NPCs
+                PrepareNPCForCombat(a);
+                PrepareNPCForCombat(b);
+                
+                // Ensure CombatBehaviour references exist and are properly configured
                 EnsureCombatBehaviourAssigned(a);
                 EnsureCombatBehaviourAssigned(b);
                 ConfigureCombat(a);
                 ConfigureCombat(b);
+                
+                // Set up mutual targeting
                 if (a.Behaviour.CombatBehaviour != null)
                 {
                     a.Behaviour.CombatBehaviour.SetTarget(null, b.NetworkObject);
@@ -259,6 +302,93 @@ namespace NPCBattleRoyale.BattleRoyale
             {
                 MelonLogger.Warning($"[BR] ForceCombat error: {ex}");
             }
+        }
+
+        /// <summary>
+        /// Move winner to a safe staging area around the arena and freeze them for later rounds.
+        /// </summary>
+        public void StageWinner(NPC npc, int slotIndex)
+        {
+            if (npc == null) return;
+            try
+            {
+                // Ensure no combat and no schedule for staged winners
+                if (npc.Behaviour?.CombatBehaviour != null)
+                {
+                    npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                }
+                if (npc.Behaviour?.ScheduleManager != null)
+                {
+                    npc.Behaviour.ScheduleManager.DisableSchedule();
+                }
+                // Stop movement
+                npc.Movement?.Stop();
+                // Place near arena but outside ring
+                var arena = Arenas[ActiveArenaIndex];
+                var pos = GetStagingPosition(arena, slotIndex);
+                npc.Movement?.Warp(pos);
+                npc.Movement?.FacePoint(arena.Center);
+                if (!_stagedWinners.Contains(npc)) _stagedWinners.Add(npc);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[BR] StageWinner error: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Compute a staging position around the arena for winners to wait safely.
+        /// </summary>
+        public Vector3 GetStagingPosition(ArenaDefinition arena, int index)
+        {
+            float radius = Mathf.Max(3f, arena.Radius * 1.8f);
+            float angle = (index % 12) / 12f * Mathf.PI * 2f; // 12 evenly spaced slots
+            Vector3 pos = arena.Center + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+            if (NavMeshUtility.SamplePosition(pos, out var hit, 3f, -1))
+            {
+                return hit.position;
+            }
+            return pos;
+        }
+
+        /// <summary>
+        /// Returns true if an NPC is currently staged.
+        /// </summary>
+        public bool IsStaged(NPC npc) => npc != null && _stagedWinners.Contains(npc);
+
+        /// <summary>
+        /// Clears staged winners list (used when tournament completes).
+        /// </summary>
+        public void ClearStagedWinners() => _stagedWinners.Clear();
+
+        private void PrepareNPCForCombat(NPC npc)
+        {
+            if (npc == null || npc.Behaviour == null) return;
+            
+            // Disable problematic behaviors that could interfere with combat
+            SafeDisable(npc.Behaviour.FleeBehaviour);
+            SafeDisable(npc.Behaviour.CallPoliceBehaviour);
+            SafeDisable(npc.Behaviour.StationaryBehaviour);
+            npc.Behaviour.ScheduleManager.ScheduleEnabled = false;
+            SafeDisable(npc.Behaviour.DeadBehaviour);
+            SafeDisable(npc.Behaviour.UnconsciousBehaviour);
+            SafeDisable(npc.Behaviour.RagdollBehaviour);
+            SafeDisable(npc.Behaviour.CoweringBehaviour);
+            SafeDisable(npc.Behaviour.FaceTargetBehaviour);
+            SafeDisable(npc.Behaviour.SummonBehaviour);
+            SafeDisable(npc.Behaviour.GenericDialogueBehaviour);
+            SafeDisable(npc.Behaviour.RequestProductBehaviour);
+            SafeDisable(npc.Behaviour.ConsumeProductBehaviour);
+            
+            // Disable schedule to prevent interruptions
+            if (npc.Behaviour.ScheduleManager != null)
+            {
+                npc.Behaviour.ScheduleManager.DisableSchedule();
+            }
+            // Increase aggression to ensure focus on fighting
+            npc.OverrideAggression(1f);
+            // Reduce awareness-based distractions
+            npc.Awareness?.SetAwarenessActive(false);
         }
 
         private void ConfigureCombat(NPC npc)
@@ -289,11 +419,33 @@ namespace NPCBattleRoyale.BattleRoyale
             foreach (var npc in GetAllNPCs())
             {
                 if (npc == null || npc.Behaviour == null) continue;
-                npc.Behaviour.CombatBehaviour.Disable_Networked(null);
-                // Optionally re-enable schedules
-                if (npc.Behaviour.ScheduleManager != null)
+                
+                // Safely disable combat behavior
+                try
                 {
-                    npc.Behaviour.ScheduleManager.EnableSchedule();
+                    if (npc.Behaviour.CombatBehaviour != null)
+                    {
+                        npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[BR] Error disabling combat for {npc.fullName}: {ex}");
+                }
+                
+                // Re-enable schedules to restore normal behavior
+                try
+                {
+                    if (npc.Behaviour.ScheduleManager != null)
+                    {
+                        npc.Behaviour.ScheduleManager.EnableSchedule();
+                    }
+                    npc.ResetAggression();
+                    npc.Awareness?.SetAwarenessActive(true);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[BR] Error re-enabling schedule for {npc.fullName}: {ex}");
                 }
             }
             UnsubscribeAll();
@@ -348,6 +500,8 @@ namespace NPCBattleRoyale.BattleRoyale
         private void OnNPCEliminated(NPC eliminated)
         {
             if (State != RoundState.Fighting) return;
+            // When a tournament controls the flow, do not auto re-pair here
+            if (ExternalControlActive) return;
             var alive = GetAllNPCsAlive();
             if (alive.Count <= 1)
             {
@@ -355,8 +509,14 @@ namespace NPCBattleRoyale.BattleRoyale
                 StopRound();
                 return;
             }
-            // Re-pair and re-aggro all survivors
-            PairAndAggroAll();
+            
+            // Only re-pair survivors if needed, not on every elimination
+            // This reduces performance impact significantly
+            if (alive.Count > 2 && alive.Count % 3 == 0) // Re-pair every 3rd elimination or when few remain
+            {
+                MelonLogger.Msg($"[BR] Re-pairing {alive.Count} survivors");
+                PairAndAggroAll();
+            }
         }
 
         private void DestroyEnvironment()

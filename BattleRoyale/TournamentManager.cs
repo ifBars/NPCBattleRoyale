@@ -21,6 +21,7 @@ namespace NPCBattleRoyale.BattleRoyale
 
         private readonly List<NPC> _currentParticipants = new List<NPC>();
         private readonly List<(string group, NPC winner)> _groupWinners = new List<(string, NPC)>();
+        private readonly System.Random _rng = new System.Random();
 
         public TournamentManager(BattleRoyaleManager manager, List<GroupDefinition> groups, RoundSettings settings)
         {
@@ -37,6 +38,7 @@ namespace NPCBattleRoyale.BattleRoyale
         private IEnumerator RunTournamentRoutine()
         {
             _groupWinners.Clear();
+            _manager.ClearStagedWinners();
 
             // Group stage
             for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
@@ -60,6 +62,8 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (winner != null)
                 {
                     _groupWinners.Add((groupName, winner));
+                    // Move winner off to staging area near arena
+                    _manager.StageWinner(winner, _groupWinners.Count - 1);
                 }
                 yield return null;
             }
@@ -75,6 +79,8 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (champion != null)
                 {
                     MelonLogger.Msg($"[BR] Tournament complete. Champion: {champion.fullName}");
+                    // Stage champion distinctly
+                    _manager.StageWinner(champion, 0);
                 }
             }
             else
@@ -86,11 +92,16 @@ namespace NPCBattleRoyale.BattleRoyale
         private List<NPC> FilterNPCsByGroup(GroupDefinition def)
         {
             var result = new List<NPC>();
+            // NPCManager.NPCRegistry is authoritative; also ensure NPCs are spawned and have movement & health
             foreach (var npc in NPCManager.NPCRegistry)
             {
                 if (npc == null) continue;
                 if (_manager.IsIgnored(npc.ID)) continue;
-                if (GroupConfig.IsMember(def, npc)) result.Add(npc);
+                if (npc.Movement == null || npc.Health == null) continue;
+                if (!npc.Health.IsDead && GroupConfig.IsMember(def, npc))
+                {
+                    result.Add(npc);
+                }
             }
             return result;
         }
@@ -200,6 +211,10 @@ namespace NPCBattleRoyale.BattleRoyale
             _manager.ActiveArenaIndex = Mathf.Clamp(_settings.ArenaIndex, 0, _manager.Arenas.Length - 1);
             var arena = _manager.Arenas[_manager.ActiveArenaIndex];
 
+            // Signal manager that a controlled tournament round is running
+            _manager.SetExternalControl(true);
+            _manager.SetActiveParticipants(_currentParticipants);
+
             _manager.State = RoundState.Gathering;
             _manager.UnsubscribeAll();
             for (int i = 0; i < participants.Count; i++)
@@ -211,28 +226,39 @@ namespace NPCBattleRoyale.BattleRoyale
                 _manager.TeleportToArenaGrid(npc, arena.Center, arena.Radius * 0.6f, i, participants.Count);
                 _manager.SubscribeElimination(npc);
             }
-            _manager.PairAndAggroAll();
+            // Only pair the active participants to avoid global aggro storms
+            _manager.PairAndAggroActiveParticipants();
             _manager.SetGatesActive(true);
             _manager.State = RoundState.Fighting;
 
             float start = Time.time;
             int lastAliveCount = participants.Count;
+            float lastCheckTime = Time.time;
+            
             while (Time.time - start < _settings.MatchTimeoutSeconds)
             {
-                var alive = GetAlive(_currentParticipants);
-                if (alive.Count != lastAliveCount)
+                // Only check every 0.5 seconds to reduce performance impact
+                if (Time.time - lastCheckTime >= 0.5f)
                 {
-                    MelonLogger.Msg($"[BR] {alive.Count} participants remaining");
-                    lastAliveCount = alive.Count;
+                    var alive = GetAlive(_currentParticipants);
+                    if (alive.Count != lastAliveCount)
+                    {
+                        MelonLogger.Msg($"[BR] {alive.Count} participants remaining");
+                        lastAliveCount = alive.Count;
+                        // Re-pair surviving participants so they keep fighting
+                        _manager.SetActiveParticipants(alive);
+                        _manager.PairAndAggroActiveParticipants();
+                    }
+                    if (alive.Count <= 1)
+                    {
+                        var winner = alive.Count == 1 ? alive[0] : null;
+                        _manager.StopRound();
+                        onComplete?.Invoke(winner);
+                        yield break;
+                    }
+                    lastCheckTime = Time.time;
                 }
-                if (alive.Count <= 1)
-                {
-                    var winner = alive.Count == 1 ? alive[0] : null;
-                    _manager.StopRound();
-                    onComplete?.Invoke(winner);
-                    yield break;
-                }
-                yield return null;
+                yield return new WaitForSeconds(0.1f); // Wait 0.1 seconds between checks instead of every frame
             }
 
             // Timeout
@@ -245,25 +271,46 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (hp > bestHp) { bestHp = hp; best = survivors[i]; }
             }
             _manager.StopRound();
+            _manager.SetExternalControl(false);
+            _manager.ClearActiveParticipants();
             onComplete?.Invoke(best);
         }
 
         private IEnumerator RunBracketRoutine(List<NPC> finalists, System.Action<NPC> onComplete)
         {
-            var list = new List<NPC>(finalists);
-            Shuffle(list);
-            while (list.Count > 1)
+            var queue = new Queue<NPC>(finalists);
+            var nextRound = new List<NPC>();
+            // Pure single-elimination bracket
+            while (queue.Count + nextRound.Count > 1)
             {
-                var a = list[0];
-                var b = list[1];
-                list.RemoveAt(0);
-                list.RemoveAt(0);
+                // If current round exhausted, move to next
+                if (queue.Count <= 1)
+                {
+                    queue = new Queue<NPC>(nextRound);
+                    nextRound.Clear();
+                }
+
+                // If odd participant count, give a bye
+                NPC first = queue.Dequeue();
+                if (queue.Count == 0)
+                {
+                    nextRound.Add(first);
+                    continue;
+                }
+                NPC second = queue.Dequeue();
+
                 NPC winner = null;
-                yield return RunFFARoutine(new List<NPC> { a, b }, w => winner = w);
-                if (winner != null) list.Add(winner);
+                yield return RunFFARoutine(new List<NPC> { first, second }, w => winner = w);
+                if (winner != null)
+                {
+                    nextRound.Add(winner);
+                    // Stage the winner visibly
+                    _manager.StageWinner(winner, nextRound.Count - 1);
+                }
                 yield return null;
             }
-            onComplete?.Invoke(list.Count == 1 ? list[0] : null);
+            var champ = (queue.Count == 1 ? queue.Dequeue() : (nextRound.Count == 1 ? nextRound[0] : null));
+            onComplete?.Invoke(champ);
         }
 
         private NPC RunBracket(List<NPC> finalists)

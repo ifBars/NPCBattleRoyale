@@ -15,7 +15,9 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         public override string PageTitle => "Setup";
         
         private DropdownWrapper _arenaDropdown;
-        private ToggleGroupWrapper _groupsContainer;
+        private PanelWrapper _groupsArea;
+        private ToggleGroupWrapper _groupsLeft;
+        private ToggleGroupWrapper _groupsRight;
         private SliderWrapper _participantsSlider;
         private TextWrapper _participantsLabel;
         
@@ -118,12 +120,29 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                 .SetPosition(0, -240) // Moved down to account for taller rows
                 .Build();
             
-            // Groups container
-            _groupsContainer = UI.ToggleGroup(PagePanel.RectTransform)
+            // Two-column groups area to avoid overflowing behind the footer
+            _groupsArea = UI.Panel(PagePanel.RectTransform)
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
-                .SetPosition(0, -290) // Moved down to account for taller rows
-                .SetSize(780, 150)
+                .SetPosition(0, -290)
+                .SetSize(820, 260)
+                .SetBackgroundColor(new Color(0.18f, 0.2f, 0.24f, 0.15f))
+                .Build();
+
+            // Left column
+            _groupsLeft = UI.ToggleGroup(_groupsArea.RectTransform)
+                .SetAnchor(0.5f, 1f)
+                .SetPivot(0.5f, 1f)
+                .SetPosition(-200, 0)
+                .SetSize(380, 240)
+                .Build();
+
+            // Right column
+            _groupsRight = UI.ToggleGroup(_groupsArea.RectTransform)
+                .SetAnchor(0.5f, 1f)
+                .SetPivot(0.5f, 1f)
+                .SetPosition(200, 0)
+                .SetSize(380, 240)
                 .Build();
             
             RefreshGroupToggles();
@@ -132,16 +151,24 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         private void RefreshGroupToggles()
         {
             // Clear existing toggles
-            for (int i = _groupsContainer.RectTransform.childCount - 1; i >= 0; i--)
+            if (_groupsLeft != null)
             {
-                UnityEngine.Object.DestroyImmediate(_groupsContainer.RectTransform.GetChild(i).gameObject);
+                for (int i = _groupsLeft.RectTransform.childCount - 1; i >= 0; i--)
+                    UnityEngine.Object.DestroyImmediate(_groupsLeft.RectTransform.GetChild(i).gameObject);
             }
-            
-            // Add current groups
+            if (_groupsRight != null)
+            {
+                for (int i = _groupsRight.RectTransform.childCount - 1; i >= 0; i--)
+                    UnityEngine.Object.DestroyImmediate(_groupsRight.RectTransform.GetChild(i).gameObject);
+            }
+
+            // Split groups into two balanced columns
+            int leftCount = Mathf.CeilToInt(Groups.Count / 2f);
             for (int i = 0; i < Groups.Count; i++)
             {
                 var name = Groups[i].Name;
-                var toggle = _groupsContainer.AddToggle(name);
+                var container = (i < leftCount) ? _groupsLeft : _groupsRight;
+                var toggle = container.AddToggle(name);
                 toggle.IsOn = CurrentSettings.SelectedGroups.Exists(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
                 toggle.OnValueChanged += on => OnGroupToggled(name, on);
             }
