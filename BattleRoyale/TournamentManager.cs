@@ -40,32 +40,111 @@ namespace NPCBattleRoyale.BattleRoyale
             _groupWinners.Clear();
             _manager.ClearStagedWinners();
 
-            // Group stage
-            for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
+            if (_settings.TournamentMode == ETournamentMode.GroupsThenFinals)
             {
-                var groupName = _settings.SelectedGroups[gi];
-                var def = _groups.Find(g => string.Equals(g.Name, groupName, System.StringComparison.OrdinalIgnoreCase));
-                if (def == null) continue;
-
-                var candidates = FilterNPCsByGroup(def);
-                if (candidates.Count == 0) continue;
-
-                var picked = PickParticipants(candidates, _settings.ParticipantsPerGroup, _settings.ShuffleParticipants);
-                if (picked.Count < 2)
+                // Group stage → collect winners (or advance top N)
+                for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
                 {
-                    MelonLogger.Msg($"[BR] Group {groupName} has fewer than 2 participants; skipping.");
-                    continue;
-                }
+                    var groupName = _settings.SelectedGroups[gi];
+                    var def = _groups.Find(g => string.Equals(g.Name, groupName, System.StringComparison.OrdinalIgnoreCase));
+                    if (def == null) continue;
 
-                NPC winner = null;
-                yield return RunFFARoutine(picked, w => winner = w);
-                if (winner != null)
-                {
-                    _groupWinners.Add((groupName, winner));
-                    // Move winner off to staging area near arena
-                    _manager.StageWinner(winner, _groupWinners.Count - 1);
+                    var candidates = FilterNPCsByGroup(def);
+                    if (candidates.Count == 0) continue;
+
+                    var picked = PickParticipants(candidates, _settings.ParticipantsPerGroup, _settings.ShuffleParticipants);
+                    if (picked.Count < 2)
+                    {
+                        MelonLogger.Msg($"[BR] Group {groupName} has fewer than 2 participants; skipping.");
+                        continue;
+                    }
+
+                    // If MaxFFASize set, split into chunks and run sequential FFAs to find a local winner pool
+                    var localWinners = new List<NPC>();
+                    if (_settings.MaxFFASize > 0 && picked.Count > _settings.MaxFFASize)
+                    {
+                        int idx = 0;
+                        while (idx < picked.Count)
+                        {
+                            var chunk = picked.GetRange(idx, Mathf.Min(_settings.MaxFFASize, picked.Count - idx));
+                            NPC chunkWinner = null;
+                            yield return RunFFARoutine(chunk, w => chunkWinner = w);
+                            if (chunkWinner != null) localWinners.Add(chunkWinner);
+                            idx += _settings.MaxFFASize;
+                            if (_settings.InterRoundDelaySeconds > 0f) yield return new WaitForSeconds(_settings.InterRoundDelaySeconds);
+                            if (_settings.HealBetweenRounds && chunkWinner != null) HealNPC(chunkWinner);
+                        }
+                    }
+                    else
+                    {
+                        localWinners.AddRange(picked);
+                    }
+
+                    // If we still have more than needed, run mini-FFA to decide top AdvancePerGroup
+                    var adv = Mathf.Max(1, _settings.AdvancePerGroup);
+                    var toAdvance = new List<NPC>();
+                    if (localWinners.Count > adv)
+                    {
+                        // Run repeated FFAs reducing to Adv count
+                        var pool = new List<NPC>(localWinners);
+                        while (pool.Count > adv)
+                        {
+                            NPC w = null;
+                            yield return RunFFARoutine(pool, x => w = x);
+                            if (w != null)
+                            {
+                                toAdvance.Add(w);
+                                pool.Remove(w);
+                                if (_settings.HealBetweenRounds) HealNPC(w);
+                            }
+                            if (_settings.InterRoundDelaySeconds > 0f) yield return new WaitForSeconds(_settings.InterRoundDelaySeconds);
+                        }
+                        // Fill remaining by best health snapshot
+                        while (toAdvance.Count < adv && pool.Count > 0)
+                        {
+                            toAdvance.Add(pool[0]);
+                            pool.RemoveAt(0);
+                        }
+                    }
+                    else
+                    {
+                        toAdvance.AddRange(localWinners);
+                    }
+
+                    // Stage and record
+                    for (int i = 0; i < toAdvance.Count; i++)
+                    {
+                        _groupWinners.Add((groupName, toAdvance[i]));
+                        _manager.StageWinner(toAdvance[i], _groupWinners.Count - 1);
+                    }
                 }
-                yield return null;
+            }
+            else
+            {
+                // Single-elimination across all selected groups
+                var everyone = new List<NPC>();
+                for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
+                {
+                    var groupName = _settings.SelectedGroups[gi];
+                    var def = _groups.Find(g => string.Equals(g.Name, groupName, System.StringComparison.OrdinalIgnoreCase));
+                    if (def == null) continue;
+                    everyone.AddRange(PickParticipants(FilterNPCsByGroup(def), _settings.ParticipantsPerGroup, _settings.ShuffleParticipants));
+                }
+                if (everyone.Count >= 2)
+                {
+                    NPC champion = null;
+                    yield return RunBracketRoutine(everyone, w => champion = w);
+                    if (champion != null)
+                    {
+                        MelonLogger.Msg($"[BR] Tournament complete. Champion: {champion.fullName}");
+                        _manager.StageWinner(champion, 0);
+                    }
+                }
+                else
+                {
+                    MelonLogger.Msg("[BR] Not enough participants for single-elimination mode.");
+                }
+                yield break;
             }
 
             // Finals
@@ -352,6 +431,13 @@ namespace NPCBattleRoyale.BattleRoyale
                 list[i] = list[j];
                 list[j] = tmp;
             }
+        }
+
+        private void HealNPC(NPC n)
+        {
+            if (n == null || n.Health == null) return;
+            if (n.Health.IsDead || n.Health.IsKnockedOut) n.Health.Revive();
+            n.Health.Health = n.Health.MaxHealth;
         }
     }
 }
