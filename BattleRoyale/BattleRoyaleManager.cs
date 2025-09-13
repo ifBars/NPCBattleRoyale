@@ -2,16 +2,20 @@ using MelonLoader;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Events;
+using UnityEngine.UI;
 #if MONO
 using ScheduleOne.NPCs;
 using ScheduleOne.DevUtilities;
 using ScheduleOne.Interaction;
+using ScheduleOne.PlayerScripts;
+using ScheduleOne.Police;
 #else
 using Il2CppScheduleOne.NPCs;
 using Il2CppScheduleOne.DevUtilities;
 using Il2CppScheduleOne.Interaction;
 using Il2CppScheduleOne.PlayerScripts;
 using Il2CppScheduleOne.Combat;
+using Il2CppScheduleOne.Police;
 #endif
 
 namespace NPCBattleRoyale.BattleRoyale
@@ -23,15 +27,17 @@ namespace NPCBattleRoyale.BattleRoyale
 
         public ArenaDefinition[] Arenas = new ArenaDefinition[2]
         {
-            new ArenaDefinition
+            new()
             {
                 Name = "Police Station",
                 Center = new Vector3(19.265f, 1.065f, 37.653f),
                 Radius = 7f,
                 GateLocalPositions = new [] { new Vector3(-2.2284f, 0.0f, 8.1987f), new Vector3(7.0373f, 0.0f, -1.0304f) },
-                PanelLocalOffset = new Vector3(6f, 0f, -6f)
+                GateLocalEulerAngles = new [] { new Vector3(0f, 0f, 0f), new Vector3(0f, 90f, 0f) },
+                PanelLocalOffset = new Vector3(8f, 0f, -6f),
+                PanelLocalEulerAngles = new Vector3(0f, 90f, 0f),
             },
-            new ArenaDefinition
+            new()
             {
                 Name = "Chemical Station",
                 Center = new Vector3(-109.745f, -2.935f, 92.271f),
@@ -46,17 +52,80 @@ namespace NPCBattleRoyale.BattleRoyale
         public RoundState State { get; set; } = RoundState.Idle;
         public string[] IgnoredNPCIDs = new string[]
         {
-            "thomas_benzies", "uncle_nelson", "cartelgoon3", "cartelgoon1", "cartelgoon", "cartelgoon2", "cartelgoon4", "cartelgoon5", "igor_romanovich_door",
+            "shirley_watts", "thomas_benzies", "uncle_nelson", "cartelgoon3", "cartelgoon1", "cartelgoon", "cartelgoon2", "cartelgoon4", "cartelgoon5", "igor_romanovich_door", "salvador_moreno"
         };
 
-        private readonly List<NPC> _roundNPCs = new List<NPC>();
-        private readonly List<GameObject> _gates = new List<GameObject>();
+        private readonly List<NPC> _roundNPCs = new();
+        private readonly List<GameObject> _gates = new();
         private GameObject _panelRoot;
-        private readonly Dictionary<NPC, UnityAction> _deathHandlers = new Dictionary<NPC, UnityAction>();
-        private readonly Dictionary<NPC, UnityAction> _koHandlers = new Dictionary<NPC, UnityAction>();
-        private readonly List<NPC> _stagedWinners = new List<NPC>();
-        private readonly HashSet<NPC> _activeParticipants = new HashSet<NPC>();
+        private readonly Dictionary<NPC, UnityAction> _deathHandlers = new();
+        private readonly Dictionary<NPC, UnityAction> _koHandlers = new();
+        private readonly List<NPC> _stagedWinners = new();
+        private readonly HashSet<NPC> _activeParticipants = new();
         public bool ExternalControlActive { get; private set; }
+
+        // Winner toast UI
+        private Canvas _toastCanvas;
+        private Text _toastText;
+        private Coroutine _toastRoutine;
+
+        /// <summary>
+        /// Teleport the player near the arena center with a safe offset.
+        /// </summary>
+        public void TeleportPlayerToArena()
+        {
+            try
+            {
+                var pm = PlayerSingleton<PlayerMovement>.Instance;
+                if (pm == null) return;
+                var arena = Arenas[ActiveArenaIndex];
+                pm.Teleport(arena.Center);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Teleport the player to the in-world control panel.
+        /// </summary>
+        public void TeleportPlayerToControlPanel()
+        {
+            try
+            {
+                var pm = PlayerSingleton<PlayerMovement>.Instance;
+                if (pm == null) return;
+                if (_panelRoot == null)
+                {
+                    TrySpawnEnvironmentForActiveArena();
+                }
+                if (_panelRoot == null) return;
+                var target = _panelRoot.transform.position + new Vector3(0f, 0.5f, -1.2f);
+                pm.Teleport(target);
+                Vector3 lookDir = _panelRoot.transform.position - target;
+                lookDir.y = 0f;
+                if (lookDir.sqrMagnitude > 0.001f)
+                {
+                    var rot = Quaternion.LookRotation(lookDir.normalized, Vector3.up);
+                    pm.LerpPlayerRotation(rot, 0.1f);
+                }
+            }
+            catch { }
+        }
+
+        private static Transform GetPlayerRootTransform()
+        {
+            // Best-effort: try tagged player, then camera root
+            var go = GameObject.FindWithTag("Player");
+            if (go != null) return go.transform;
+            if (Camera.main != null)
+            {
+                var tr = Camera.main.transform;
+                while (tr.parent != null) tr = tr.parent;
+                return tr;
+            }
+            // Fallback: any character controller in scene
+            var cc = GameObject.FindObjectOfType<CharacterController>();
+            return cc != null ? cc.transform : null;
+        }
 
         private Material CreateVisibleMaterial(Color color)
         {
@@ -80,6 +149,7 @@ namespace NPCBattleRoyale.BattleRoyale
             Instance = this;
             DontDestroyOnLoad(gameObject);
             TrySpawnEnvironmentForActiveArena();
+            EnsureToastUI();
         }
 
         public void OnNPCStart(NPC npc)
@@ -132,6 +202,7 @@ namespace NPCBattleRoyale.BattleRoyale
             {
                 var npc = all[i];
                 if (npc == null) continue;
+                if (!ShouldIncludePolice() && IsPolice(npc)) continue;
                 if (npc.Health.IsDead || npc.Health.IsKnockedOut)
                 {
                     npc.Health.Revive();
@@ -139,6 +210,27 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null)
                 {
                     npc.Behaviour.ScheduleManager.DisableSchedule();
+                    // Also disable any ScheduleBehaviour so it cannot re-enable schedules during the round
+                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    for (int s = 0; s < schedBehaviours.Length; s++)
+                    {
+                        schedBehaviours[s].Disable_Networked(null);
+                    }
+                    
+                    // Clear any existing combat targets to prevent chasing non-participants
+                    if (npc.Behaviour.CombatBehaviour != null && npc.Behaviour.CombatBehaviour.Active)
+                    {
+                        npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                    }
+                    // Ensure NPCs leave buildings/vehicles before warping to arena
+                    if (npc.isInBuilding)
+                    {
+                        npc.ExitBuilding();
+                    }
+                    if (npc.IsInVehicle)
+                    {
+                        npc.ExitVehicle();
+                    }
                 }
                 TeleportToArenaGrid(npc, arena.Center, arena.Radius * 0.6f, i, all.Count);
                 SubscribeElimination(npc);
@@ -148,11 +240,26 @@ namespace NPCBattleRoyale.BattleRoyale
         public void PairAndAggroAll()
         {
             var list = new List<NPC>(GetAllNPCsAlive());
+            try
+            {
+                string ids = "";
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (list[i] == null) continue;
+                    if (ids.Length > 0) ids += ", ";
+                    ids += list[i].ID;
+                }
+                MelonLogger.Msg($"[BR] PairAndAggroAll participants ({list.Count}): {ids}");
+            }
+            catch { }
             for (int i = 0; i < list.Count; i++)
             {
                 var self = list[i];
                 var target = list[(i + 1) % list.Count];
-                ForceCombat(self, target);
+                if (IsAllowedCombatant(self) && IsAllowedCombatTarget(target))
+                {
+                    ForceCombat(self, target);
+                }
             }
         }
 
@@ -190,11 +297,26 @@ namespace NPCBattleRoyale.BattleRoyale
         public void PairAndAggroActiveParticipants()
         {
             var list = GetActiveParticipantsAlive();
+            try
+            {
+                string ids = "";
+                for (int i = 0; i < list.Count; i++)
+                {
+                    if (list[i] == null) continue;
+                    if (ids.Length > 0) ids += ", ";
+                    ids += list[i].ID;
+                }
+                MelonLogger.Msg($"[BR] PairAndAggroActiveParticipants ({list.Count}): {ids}");
+            }
+            catch { }
             for (int i = 0; i < list.Count; i++)
             {
                 var self = list[i];
                 var target = list[(i + 1) % Mathf.Max(1, list.Count)];
-                ForceCombat(self, target);
+                if (IsAllowedCombatant(self) && IsAllowedCombatTarget(target))
+                {
+                    ForceCombat(self, target);
+                }
             }
         }
 
@@ -211,6 +333,7 @@ namespace NPCBattleRoyale.BattleRoyale
             foreach (var npc in NPCManager.NPCRegistry)
             {
                 if (npc == null) continue;
+                if (!ShouldIncludePolice() && IsPolice(npc)) continue;
                 if (!IsIgnored(npc.ID)) list.Add(npc);
             }
             return list;
@@ -223,6 +346,7 @@ namespace NPCBattleRoyale.BattleRoyale
             {
                 if (npc == null || npc.Health == null) continue;
                 if (npc.Health.IsDead || npc.Health.IsKnockedOut) continue;
+                if (!ShouldIncludePolice() && IsPolice(npc)) continue;
                 if (!IsIgnored(npc.ID)) result.Add(npc);
             }
             return result;
@@ -242,6 +366,27 @@ namespace NPCBattleRoyale.BattleRoyale
             }
             return false;
         }
+
+        private static bool IsPolice(NPC npc)
+        {
+            try { return npc is PoliceOfficer; } catch { return false; }
+        }
+
+        public bool IsAllowedCombatant(NPC npc)
+        {
+            if (npc == null || npc.Health == null) return false;
+            if (npc.Health.IsDead || npc.Health.IsKnockedOut) return false;
+            if (!ShouldIncludePolice() && IsPolice(npc)) return false;
+            if (IsIgnored(npc.ID)) return false;
+            if (ExternalControlActive) return _activeParticipants.Contains(npc);
+            return true;
+        }
+        private bool ShouldIncludePolice()
+        {
+            try { return ConfigPanel.Instance != null && ConfigPanel.Instance.CurrentSettings.IncludePolice; } catch { return false; }
+        }
+
+        public bool IsAllowedCombatTarget(NPC npc) => IsAllowedCombatant(npc);
 
         public void TeleportToArenaGrid(NPC npc, Vector3 center, float radius, int index, int total)
         {
@@ -268,9 +413,15 @@ namespace NPCBattleRoyale.BattleRoyale
             if (a == null || b == null) return;
             try
             {
+                // If both are already targeting each other in combat, do nothing to avoid stutters
+                if (IsAlreadyTargeting(a, b) && IsAlreadyTargeting(b, a))
+                {
+                    return;
+                }
+
                 // Comprehensive behavior management for both NPCs
-                PrepareNPCForCombat(a);
-                PrepareNPCForCombat(b);
+                PrepareNPCForCombat(a, b);
+                PrepareNPCForCombat(b, a);
                 
                 // Ensure CombatBehaviour references exist and are properly configured
                 EnsureCombatBehaviourAssigned(a);
@@ -278,11 +429,18 @@ namespace NPCBattleRoyale.BattleRoyale
                 ConfigureCombat(a);
                 ConfigureCombat(b);
                 
-                // Set up mutual targeting
+                // Set up mutual targeting (guard against invalid targets like police or non-participants)
                 if (a.Behaviour.CombatBehaviour != null)
                 {
-                    a.Behaviour.CombatBehaviour.SetTarget(null, b.NetworkObject);
-                    a.Behaviour.CombatBehaviour.Enable_Networked(null);
+                    // Only retarget if not already targeting and target is allowed
+                    if (!IsAlreadyTargeting(a, b) && IsAllowedCombatTarget(b))
+                    {
+                        a.Behaviour.CombatBehaviour.SetTarget(null, b.NetworkObject);
+                    }
+                    if (!a.Behaviour.CombatBehaviour.Enabled)
+                    {
+                        a.Behaviour.CombatBehaviour.Enable_Networked(null);
+                    }
                 }
                 else
                 {
@@ -290,8 +448,14 @@ namespace NPCBattleRoyale.BattleRoyale
                 }
                 if (b.Behaviour.CombatBehaviour != null)
                 {
-                    b.Behaviour.CombatBehaviour.SetTarget(null, a.NetworkObject);
-                    b.Behaviour.CombatBehaviour.Enable_Networked(null);
+                    if (!IsAlreadyTargeting(b, a) && IsAllowedCombatTarget(a))
+                    {
+                        b.Behaviour.CombatBehaviour.SetTarget(null, a.NetworkObject);
+                    }
+                    if (!b.Behaviour.CombatBehaviour.Enabled)
+                    {
+                        b.Behaviour.CombatBehaviour.Enable_Networked(null);
+                    }
                 }
                 else
                 {
@@ -302,6 +466,20 @@ namespace NPCBattleRoyale.BattleRoyale
             {
                 MelonLogger.Warning($"[BR] ForceCombat error: {ex}");
             }
+        }
+
+        private static bool IsAlreadyTargeting(NPC self, NPC target)
+        {
+            try
+            {
+                var cb = self?.Behaviour?.CombatBehaviour;
+                if (cb == null) return false;
+                if (!cb.Enabled && !cb.Active) return false;
+                var current = cb.Target;
+                if (current == null) return false;
+                return current.NetworkObject == target?.NetworkObject;
+            }
+            catch { return false; }
         }
 
         /// <summary>
@@ -361,15 +539,34 @@ namespace NPCBattleRoyale.BattleRoyale
         /// </summary>
         public void ClearStagedWinners() => _stagedWinners.Clear();
 
-        private void PrepareNPCForCombat(NPC npc)
+        private void PrepareNPCForCombat(NPC npc, NPC desiredTarget = null)
         {
             if (npc == null || npc.Behaviour == null) return;
+            
+            // Avoid forcibly disabling combat if already active and aimed at the desired target
+            if (npc.Behaviour.CombatBehaviour != null && npc.Behaviour.CombatBehaviour.Active)
+            {
+                if (desiredTarget != null)
+                {
+                    if (!IsAlreadyTargeting(npc, desiredTarget))
+                    {
+                        npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                    }
+                }
+            }
             
             // Disable problematic behaviors that could interfere with combat
             SafeDisable(npc.Behaviour.FleeBehaviour);
             SafeDisable(npc.Behaviour.CallPoliceBehaviour);
             SafeDisable(npc.Behaviour.StationaryBehaviour);
             npc.Behaviour.ScheduleManager.ScheduleEnabled = false;
+            npc.Behaviour.ScheduleManager.DisableSchedule();
+            // Explicitly disable any ScheduleBehaviour components so they cannot re-enable schedules
+            var scheduleBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+            for (int i = 0; i < scheduleBehaviours.Length; i++)
+            {
+                SafeDisable(scheduleBehaviours[i]);
+            }
             SafeDisable(npc.Behaviour.DeadBehaviour);
             SafeDisable(npc.Behaviour.UnconsciousBehaviour);
             SafeDisable(npc.Behaviour.RagdollBehaviour);
@@ -439,6 +636,12 @@ namespace NPCBattleRoyale.BattleRoyale
                     if (npc.Behaviour.ScheduleManager != null)
                     {
                         npc.Behaviour.ScheduleManager.EnableSchedule();
+                        // Re-enable ScheduleBehaviour components that were disabled at round start
+                        var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                        for (int s = 0; s < schedBehaviours.Length; s++)
+                        {
+                            schedBehaviours[s].Enable_Networked(null);
+                        }
                     }
                     npc.ResetAggression();
                     npc.Awareness?.SetAwarenessActive(true);
@@ -505,8 +708,10 @@ namespace NPCBattleRoyale.BattleRoyale
             var alive = GetAllNPCsAlive();
             if (alive.Count <= 1)
             {
-                MelonLogger.Msg("[BR] Round complete. Winner: " + (alive.Count == 1 ? alive[0].fullName : "None"));
+                var winnerName = (alive.Count == 1 ? alive[0].fullName : "None");
+                MelonLogger.Msg("[BR] Round complete. Winner: " + winnerName);
                 StopRound();
+                if (alive.Count == 1) ShowWinnerToast(winnerName);
                 return;
             }
             
@@ -528,6 +733,58 @@ namespace NPCBattleRoyale.BattleRoyale
             _gates.Clear();
             if (_panelRoot != null) Destroy(_panelRoot);
             _panelRoot = null;
+        }
+
+        private void EnsureToastUI()
+        {
+            if (_toastCanvas != null && _toastText != null) return;
+
+            var canvasGO = new GameObject("BR_WinnerToast_Canvas");
+            DontDestroyOnLoad(canvasGO);
+            _toastCanvas = canvasGO.AddComponent<Canvas>();
+            _toastCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvasGO.AddComponent<CanvasScaler>();
+            canvasGO.AddComponent<GraphicRaycaster>();
+
+            var textGO = new GameObject("BR_WinnerToast_Text");
+            textGO.transform.SetParent(canvasGO.transform, worldPositionStays: false);
+            _toastText = textGO.AddComponent<Text>();
+            _toastText.alignment = TextAnchor.MiddleCenter;
+            _toastText.color = new Color(1f, 0.95f, 0.2f, 1f);
+            _toastText.fontSize = 36;
+            _toastText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+            _toastText.text = string.Empty;
+            var rt = (RectTransform)textGO.transform;
+            rt.anchorMin = new Vector2(0.5f, 0.9f);
+            rt.anchorMax = new Vector2(0.5f, 0.9f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(900f, 80f);
+
+            _toastCanvas.gameObject.SetActive(false);
+        }
+
+        public void ShowWinnerToast(string winnerName, float seconds = 5f)
+        {
+            EnsureToastUI();
+            if (_toastRoutine != null)
+            {
+                StopCoroutine(_toastRoutine);
+                _toastRoutine = null;
+            }
+            _toastText.text = string.IsNullOrEmpty(winnerName) ? "Winner: None" : $"Winner: {winnerName}";
+            _toastCanvas.gameObject.SetActive(true);
+            _toastRoutine = StartCoroutine(HideToastAfter(seconds));
+        }
+
+        private System.Collections.IEnumerator HideToastAfter(float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            if (_toastCanvas != null)
+            {
+                _toastCanvas.gameObject.SetActive(false);
+            }
+            _toastRoutine = null;
         }
 
         private void SpawnGates(ArenaDefinition arena)
@@ -572,14 +829,14 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             _panelRoot = new GameObject("BR_ControlPanel");
             _panelRoot.transform.position = arena.Center + arena.PanelLocalOffset;
-            _panelRoot.transform.rotation = Quaternion.identity;
+            _panelRoot.transform.rotation = Quaternion.Euler(arena.PanelLocalEulerAngles);
             DontDestroyOnLoad(_panelRoot);
 
-            CreateButton(_panelRoot.transform, new Vector3(0f, 0.5f, 0f), "Start Round", StartRound);
-            CreateButton(_panelRoot.transform, new Vector3(1.25f, 0.5f, 0f), "Aggro All", PairAndAggroAll);
-            CreateButton(_panelRoot.transform, new Vector3(2.5f, 0.5f, 0f), "Toggle Gates", ToggleGates);
-            CreateButton(_panelRoot.transform, new Vector3(3.75f, 0.5f, 0f), "Stop/Reset", StopRound);
-            CreateButton(_panelRoot.transform, new Vector3(5.0f, 0.5f, 0f), "Config", () =>
+            // Trimmed controls: remove direct Start Round. Control flows from GUI now.
+            CreateButton(_panelRoot.transform, new Vector3(0f, 0.5f, 0f), "Aggro All", PairAndAggroAll);
+            CreateButton(_panelRoot.transform, new Vector3(1.25f, 0.5f, 0f), "Toggle Gates", ToggleGates);
+            CreateButton(_panelRoot.transform, new Vector3(2.5f, 0.5f, 0f), "Stop/Reset", StopRound);
+            CreateButton(_panelRoot.transform, new Vector3(3.75f, 0.5f, 0f), "Config", () =>
             {
                 try { ConfigPanel.Toggle(); }
                 catch (Exception ex) { MelonLogger.Warning($"[BR] Control action error (Config): {ex}"); }

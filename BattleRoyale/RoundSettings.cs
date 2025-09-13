@@ -1,8 +1,15 @@
 using MelonLoader;
 using Newtonsoft.Json;
+using UnityEngine;
 
 namespace NPCBattleRoyale.BattleRoyale
 {
+    public enum EPlayMode
+    {
+        Tournament = 0,
+        FreeForAll = 1
+    }
+
     public enum ETournamentMode
     {
         GroupsThenFinals = 0, // current default: each selected group runs an FFA, then winners bracket
@@ -21,7 +28,7 @@ namespace NPCBattleRoyale.BattleRoyale
     {
         public string PresetName = "Default";
         public int ArenaIndex = 0;
-        public List<string> SelectedGroups = new List<string>();
+        public List<string> SelectedGroups = new();
         public int ParticipantsPerGroup = 6;
         public bool ShuffleParticipants = true;
         public bool KnockoutCountsAsElim = true;
@@ -29,12 +36,14 @@ namespace NPCBattleRoyale.BattleRoyale
         public int FinalsParticipants = 0; // 0 => winners only; >1 => top N per group (back-compat)
 
         // New customization options
+        public EPlayMode PlayMode = EPlayMode.Tournament; // Tournament or one-off FFA
         public ETournamentMode TournamentMode = ETournamentMode.GroupsThenFinals;
         public EArenaRotation ArenaRotation = EArenaRotation.Fixed;
         public int AdvancePerGroup = 1; // Number of winners to advance from each group's stage
         public int MaxFFASize = 0;      // 0 = no cap; otherwise chunk FFAs to this size (sequentially)
         public bool HealBetweenRounds = true; // Revive/heal winners between rounds
         public float InterRoundDelaySeconds = 1.0f; // Delay between sequential matches
+        public bool IncludePolice = false; // When true, allow police to participate and teleport them into arena
     }
 
     public static class PresetConfig
@@ -60,6 +69,8 @@ namespace NPCBattleRoyale.BattleRoyale
                 // Back-compat: ensure new fields are initialized
                 for (int i = 0; i < list.Count; i++)
                 {
+                    if (list[i].PlayMode != EPlayMode.Tournament && list[i].PlayMode != EPlayMode.FreeForAll)
+                        list[i].PlayMode = EPlayMode.Tournament;
                     list[i].AdvancePerGroup = Mathf.Max(1, list[i].AdvancePerGroup);
                     if (list[i].InterRoundDelaySeconds <= 0f) list[i].InterRoundDelaySeconds = 1.0f;
                 }
@@ -90,7 +101,7 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             return new List<RoundSettings>
             {
-                new RoundSettings
+                new()
                 {
                     PresetName = "Default",
                     ArenaIndex = 1,
@@ -100,12 +111,14 @@ namespace NPCBattleRoyale.BattleRoyale
                     KnockoutCountsAsElim = true,
                     MatchTimeoutSeconds = 180f,
                     FinalsParticipants = 0,
+                    PlayMode = EPlayMode.Tournament,
                     TournamentMode = ETournamentMode.GroupsThenFinals,
                     ArenaRotation = EArenaRotation.Fixed,
                     AdvancePerGroup = 1,
                     MaxFFASize = 0,
                     HealBetweenRounds = true,
                     InterRoundDelaySeconds = 1.0f
+                    , IncludePolice = false
                 }
             };
         }

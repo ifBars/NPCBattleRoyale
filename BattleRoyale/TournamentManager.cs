@@ -19,9 +19,9 @@ namespace NPCBattleRoyale.BattleRoyale
         private readonly List<GroupDefinition> _groups;
         private readonly RoundSettings _settings;
 
-        private readonly List<NPC> _currentParticipants = new List<NPC>();
-        private readonly List<(string group, NPC winner)> _groupWinners = new List<(string, NPC)>();
-        private readonly System.Random _rng = new System.Random();
+        private readonly List<NPC> _currentParticipants = new();
+        private readonly List<(string group, NPC winner)> _groupWinners = new();
+        private readonly System.Random _rng = new();
 
         public TournamentManager(BattleRoyaleManager manager, List<GroupDefinition> groups, RoundSettings settings)
         {
@@ -35,6 +35,42 @@ namespace NPCBattleRoyale.BattleRoyale
             MelonCoroutines.Start(RunTournamentRoutine());
         }
 
+        /// <summary>
+        /// Public helper to run a single free-for-all round with the provided participants.
+        /// </summary>
+        public void RunSingleFFARoutine(List<NPC> participants)
+        {
+            if (participants == null || participants.Count < 2)
+            {
+                MelonLogger.Warning("[BR] Need at least 2 participants to run an FFA round.");
+                return;
+            }
+            MelonCoroutines.Start(RunFFARoutine(participants, w =>
+            {
+                if (w != null)
+                {
+                    _manager.ShowWinnerToast(w.fullName);
+                }
+            }));
+        }
+
+        private static void LogParticipants(string label, IList<NPC> list)
+        {
+            try
+            {
+                string ids = "";
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var n = list[i];
+                    if (n == null) continue;
+                    if (ids.Length > 0) ids += ", ";
+                    ids += n.ID;
+                }
+                MelonLogger.Msg($"[BR] {label} ({list.Count}): {ids}");
+            }
+            catch { }
+        }
+
         private IEnumerator RunTournamentRoutine()
         {
             _groupWinners.Clear();
@@ -46,7 +82,7 @@ namespace NPCBattleRoyale.BattleRoyale
                 for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
                 {
                     var groupName = _settings.SelectedGroups[gi];
-                    var def = _groups.Find(g => string.Equals(g.Name, groupName, System.StringComparison.OrdinalIgnoreCase));
+                    var def = _groups.Find(g => string.Equals(g.Name, groupName, StringComparison.OrdinalIgnoreCase));
                     if (def == null) continue;
 
                     var candidates = FilterNPCsByGroup(def);
@@ -59,8 +95,10 @@ namespace NPCBattleRoyale.BattleRoyale
                         continue;
                     }
 
-                    // If MaxFFASize set, split into chunks and run sequential FFAs to find a local winner pool
-                    var localWinners = new List<NPC>();
+                    LogParticipants($"Group {groupName} picked", picked);
+
+                    // If MaxFFASize set, split into chunks and run sequential FFAs to find a local qualifier pool
+                    var localQualifiers = new List<NPC>();
                     if (_settings.MaxFFASize > 0 && picked.Count > _settings.MaxFFASize)
                     {
                         int idx = 0;
@@ -69,7 +107,7 @@ namespace NPCBattleRoyale.BattleRoyale
                             var chunk = picked.GetRange(idx, Mathf.Min(_settings.MaxFFASize, picked.Count - idx));
                             NPC chunkWinner = null;
                             yield return RunFFARoutine(chunk, w => chunkWinner = w);
-                            if (chunkWinner != null) localWinners.Add(chunkWinner);
+                            if (chunkWinner != null) localQualifiers.Add(chunkWinner);
                             idx += _settings.MaxFFASize;
                             if (_settings.InterRoundDelaySeconds > 0f) yield return new WaitForSeconds(_settings.InterRoundDelaySeconds);
                             if (_settings.HealBetweenRounds && chunkWinner != null) HealNPC(chunkWinner);
@@ -77,41 +115,49 @@ namespace NPCBattleRoyale.BattleRoyale
                     }
                     else
                     {
-                        localWinners.AddRange(picked);
+                        localQualifiers.AddRange(picked);
                     }
 
-                    // If we still have more than needed, run mini-FFA to decide top AdvancePerGroup
                     var adv = Mathf.Max(1, _settings.AdvancePerGroup);
-                    var toAdvance = new List<NPC>();
-                    if (localWinners.Count > adv)
+
+                    // If advancing one per group: run exactly one FFA among qualifiers to pick the group winner
+                    if (adv == 1)
                     {
-                        // Run repeated FFAs reducing to Adv count
-                        var pool = new List<NPC>(localWinners);
-                        while (pool.Count > adv)
+                        NPC groupWinner = null;
+                        if (localQualifiers.Count == 1)
                         {
-                            NPC w = null;
-                            yield return RunFFARoutine(pool, x => w = x);
-                            if (w != null)
-                            {
-                                toAdvance.Add(w);
-                                pool.Remove(w);
-                                if (_settings.HealBetweenRounds) HealNPC(w);
-                            }
-                            if (_settings.InterRoundDelaySeconds > 0f) yield return new WaitForSeconds(_settings.InterRoundDelaySeconds);
+                            groupWinner = localQualifiers[0];
                         }
-                        // Fill remaining by best health snapshot
-                        while (toAdvance.Count < adv && pool.Count > 0)
+                        else
                         {
-                            toAdvance.Add(pool[0]);
-                            pool.RemoveAt(0);
+                            LogParticipants($"Group {groupName} qualifiers", localQualifiers);
+                            yield return RunFFARoutine(localQualifiers, w => groupWinner = w);
                         }
-                    }
-                    else
-                    {
-                        toAdvance.AddRange(localWinners);
+                        if (groupWinner != null)
+                        {
+                            _groupWinners.Add((groupName, groupWinner));
+                            _manager.StageWinner(groupWinner, _groupWinners.Count - 1);
+                        }
+                        continue;
                     }
 
-                    // Stage and record
+                    // If advancing multiple per group: run FFAs to select exactly adv winners
+                    var pool = new List<NPC>(localQualifiers);
+                    var toAdvance = new List<NPC>();
+                    while (toAdvance.Count < adv && pool.Count > 0)
+                    {
+                        LogParticipants($"Group {groupName} selection pool", pool);
+                        NPC w = null;
+                        yield return RunFFARoutine(pool, x => w = x);
+                        if (w != null)
+                        {
+                            toAdvance.Add(w);
+                            pool.Remove(w);
+                            if (_settings.HealBetweenRounds) HealNPC(w);
+                        }
+                        if (_settings.InterRoundDelaySeconds > 0f) yield return new WaitForSeconds(_settings.InterRoundDelaySeconds);
+                    }
+                    // Record and stage exactly the selected winners
                     for (int i = 0; i < toAdvance.Count; i++)
                     {
                         _groupWinners.Add((groupName, toAdvance[i]));
@@ -126,7 +172,7 @@ namespace NPCBattleRoyale.BattleRoyale
                 for (int gi = 0; gi < _settings.SelectedGroups.Count; gi++)
                 {
                     var groupName = _settings.SelectedGroups[gi];
-                    var def = _groups.Find(g => string.Equals(g.Name, groupName, System.StringComparison.OrdinalIgnoreCase));
+                    var def = _groups.Find(g => string.Equals(g.Name, groupName, StringComparison.OrdinalIgnoreCase));
                     if (def == null) continue;
                     everyone.AddRange(PickParticipants(FilterNPCsByGroup(def), _settings.ParticipantsPerGroup, _settings.ShuffleParticipants));
                 }
@@ -147,19 +193,21 @@ namespace NPCBattleRoyale.BattleRoyale
                 yield break;
             }
 
-            // Finals
+            // Finals: single FFA among group winners
             if (_groupWinners.Count >= 2)
             {
                 var finalists = new List<NPC>();
                 for (int i = 0; i < _groupWinners.Count; i++) finalists.Add(_groupWinners[i].winner);
+                LogParticipants("Finalists", finalists);
 
                 NPC champion = null;
-                yield return RunBracketRoutine(finalists, w => champion = w);
+                yield return RunFFARoutine(finalists, w => champion = w);
                 if (champion != null)
                 {
                     MelonLogger.Msg($"[BR] Tournament complete. Champion: {champion.fullName}");
                     // Stage champion distinctly
                     _manager.StageWinner(champion, 0);
+                    _manager.ShowWinnerToast(champion.fullName);
                 }
             }
             else
@@ -196,6 +244,7 @@ namespace NPCBattleRoyale.BattleRoyale
         private NPC RunFreeForAll(List<NPC> participants)
         {
             MelonLogger.Msg($"[BR] Starting FFA with {participants.Count} participants");
+            LogParticipants("FFA participants", participants);
 
             _currentParticipants.Clear();
             _currentParticipants.AddRange(participants);
@@ -225,10 +274,21 @@ namespace NPCBattleRoyale.BattleRoyale
                     npc.Health.Revive();
                 }
 
-                // Disable schedule
+                // Disable schedule and ScheduleBehaviour components
                 if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null)
                 {
                     npc.Behaviour.ScheduleManager.DisableSchedule();
+                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    for (int s = 0; s < schedBehaviours.Length; s++)
+                    {
+                        schedBehaviours[s].Disable_Networked(null);
+                    }
+                    
+                    // Clear any existing combat targets to prevent chasing non-participants
+                    if (npc.Behaviour.CombatBehaviour != null && npc.Behaviour.CombatBehaviour.Active)
+                    {
+                        npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                    }
                 }
 
                 // Position in arena
@@ -279,10 +339,11 @@ namespace NPCBattleRoyale.BattleRoyale
             return best;
         }
 
-        private IEnumerator RunFFARoutine(List<NPC> participants, System.Action<NPC> onComplete)
+        private IEnumerator RunFFARoutine(List<NPC> participants, Action<NPC> onComplete)
         {
             _currentParticipants.Clear();
             _currentParticipants.AddRange(participants);
+            LogParticipants("FFA participants", participants);
 
             if (_manager.State != RoundState.Idle)
                 _manager.StopRound();
@@ -301,7 +362,30 @@ namespace NPCBattleRoyale.BattleRoyale
                 var npc = participants[i];
                 if (npc == null) continue;
                 if (npc.Health.IsDead || npc.Health.IsKnockedOut) npc.Health.Revive();
-                if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null) npc.Behaviour.ScheduleManager.DisableSchedule();
+                if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null)
+                {
+                    npc.Behaviour.ScheduleManager.DisableSchedule();
+                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    for (int s = 0; s < schedBehaviours.Length; s++)
+                    {
+                        schedBehaviours[s].Disable_Networked(null);
+                    }
+                    
+                    // Clear any existing combat targets to prevent chasing non-participants
+                    if (npc.Behaviour.CombatBehaviour != null && npc.Behaviour.CombatBehaviour.Active)
+                    {
+                        npc.Behaviour.CombatBehaviour.Disable_Networked(null);
+                    }
+                    // Ensure NPCs leave buildings/vehicles before warping to arena
+                    if (npc.isInBuilding)
+                    {
+                        npc.ExitBuilding();
+                    }
+                    if (npc.IsInVehicle)
+                    {
+                        npc.ExitVehicle();
+                    }
+                }
                 _manager.TeleportToArenaGrid(npc, arena.Center, arena.Radius * 0.6f, i, participants.Count);
                 _manager.SubscribeElimination(npc);
             }
@@ -355,7 +439,7 @@ namespace NPCBattleRoyale.BattleRoyale
             onComplete?.Invoke(best);
         }
 
-        private IEnumerator RunBracketRoutine(List<NPC> finalists, System.Action<NPC> onComplete)
+        private IEnumerator RunBracketRoutine(List<NPC> finalists, Action<NPC> onComplete)
         {
             var queue = new Queue<NPC>(finalists);
             var nextRound = new List<NPC>();

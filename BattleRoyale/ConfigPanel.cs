@@ -10,8 +10,12 @@ using UnityEngine.UI;
 using NPCBattleRoyale.BattleRoyale.Pages;
 #if MONO
 using ScheduleOne;
+using NPC = ScheduleOne.NPCs.NPC;
+using NPCManager = ScheduleOne.NPCs.NPCManager;
 #else
 using Il2CppScheduleOne;
+using NPC = Il2CppScheduleOne.NPCs.NPC;
+using NPCManager = Il2CppScheduleOne.NPCs.NPCManager;
 #endif
 
 namespace NPCBattleRoyale.BattleRoyale
@@ -29,7 +33,7 @@ namespace NPCBattleRoyale.BattleRoyale
         private CanvasWrapper _canvas;
         private PanelWrapper _mainPanel;
         private PanelWrapper _tabContentArea;
-        private readonly List<ButtonWrapper> _tabButtons = new List<ButtonWrapper>();
+        private readonly List<ButtonWrapper> _tabButtons = new();
         private readonly string[] _tabNames = { "Setup", "Settings", "Presets" };
         
         // Current tab tracking
@@ -42,7 +46,8 @@ namespace NPCBattleRoyale.BattleRoyale
 
         private List<GroupDefinition> _groups;
         private List<RoundSettings> _presets;
-        private RoundSettings _current = new RoundSettings();
+        private RoundSettings _current = new();
+        public RoundSettings CurrentSettings => _current;
         private bool _isVisible = false;
 
         // Input state snapshot to restore after closing
@@ -169,7 +174,7 @@ namespace NPCBattleRoyale.BattleRoyale
 
             // Create the main container - a beautiful card with dark theme
             _mainPanel = UI.Panel(_canvas.RectTransform)
-                .SetSize(900, 700)
+                .SetSize(1100, 820)
                 .SetAnchor(0.5f, 0.5f)
                 .SetPivot(0.5f, 0.5f)
                 .SetPosition(0, 0)
@@ -202,7 +207,7 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             // Header background
             var headerBg = UI.Panel(_mainPanel.RectTransform)
-                .SetSize(900, 90)
+                .SetSize(1100, 90)
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
                 .SetPosition(0, 0)
@@ -253,7 +258,7 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             // Create tab bar background
             var tabBar = UI.Panel(_mainPanel.RectTransform)
-                .SetSize(880, 50)
+                .SetSize(1080, 50)
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
                 .SetPosition(0, -100)
@@ -294,7 +299,7 @@ namespace NPCBattleRoyale.BattleRoyale
         private void CreateContentArea()
         {
             _tabContentArea = UI.Panel(_mainPanel.RectTransform)
-                .SetSize(860, 470)
+                .SetSize(1060, 650)
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
                 .SetPosition(0, -170)
@@ -322,7 +327,7 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             // Footer background
             var footerBg = UI.Panel(_mainPanel.RectTransform)
-                .SetSize(900, 70)
+                .SetSize(1100, 70)
                 .SetAnchor(0.5f, 0f)
                 .SetPivot(0.5f, 0f)
                 .SetPosition(0, 0)
@@ -331,7 +336,7 @@ namespace NPCBattleRoyale.BattleRoyale
 
             // Start Tournament button (large, prominent center)
             var startBtn = UI.Button(footerBg.RectTransform)
-                .SetText("🚀 Start Tournament")
+                .SetText("🚀 Start")
                 .SetSize(280, 50)
                 .SetAnchor(0.5f, 0.5f)
                 .SetPivot(0.5f, 0.5f)
@@ -342,7 +347,7 @@ namespace NPCBattleRoyale.BattleRoyale
                     new Color(0.1f, 0.6f, 0.2f, 1f),
                     Color.gray)
                 .Build();
-            startBtn.OnClick += StartTournament;
+            startBtn.OnClick += StartFromSettings;
 
             // Close button on the right
             var footerCloseBtn = UI.Button(footerBg.RectTransform)
@@ -358,6 +363,35 @@ namespace NPCBattleRoyale.BattleRoyale
                     Color.gray)
                 .Build();
             footerCloseBtn.OnClick += HidePanel;
+
+            // Teleport helpers on the left
+            var toArenaBtn = UI.Button(footerBg.RectTransform)
+                .SetText("Teleport: Arena")
+                .SetSize(150, 40)
+                .SetAnchor(0f, 0.5f)
+                .SetPivot(0f, 0.5f)
+                .SetPosition(20, 0)
+                .SetColors(
+                    new Color(0.35f, 0.55f, 0.95f, 1f),
+                    new Color(0.45f, 0.65f, 1f, 1f),
+                    new Color(0.25f, 0.45f, 0.85f, 1f),
+                    Color.gray)
+                .Build();
+            toArenaBtn.OnClick += () => BattleRoyaleManager.Instance?.TeleportPlayerToArena();
+
+            var toPanelBtn = UI.Button(footerBg.RectTransform)
+                .SetText("Teleport: Panel")
+                .SetSize(150, 40)
+                .SetAnchor(0f, 0.5f)
+                .SetPivot(0f, 0.5f)
+                .SetPosition(180, 0)
+                .SetColors(
+                    new Color(0.35f, 0.55f, 0.95f, 1f),
+                    new Color(0.45f, 0.65f, 1f, 1f),
+                    new Color(0.25f, 0.45f, 0.85f, 1f),
+                    Color.gray)
+                .Build();
+            toPanelBtn.OnClick += () => BattleRoyaleManager.Instance?.TeleportPlayerToControlPanel();
         }
 
         /// <summary>
@@ -428,7 +462,7 @@ namespace NPCBattleRoyale.BattleRoyale
             _presetsPage?.RefreshPresetDropdown();
         }
 
-        private void StartTournament()
+        private void StartFromSettings()
         {
             var mgr = BattleRoyaleManager.Instance;
             if (mgr == null)
@@ -447,12 +481,44 @@ namespace NPCBattleRoyale.BattleRoyale
             // Hide panel before starting
             HidePanel();
 
-            // Start tournament
-            mgr.ActiveArenaIndex = Mathf.Clamp(_current.ArenaIndex, 0, mgr.Arenas.Length - 1);
-            var tm = new TournamentManager(mgr, _groups, _current);
+            // Apply arena selection to spawn correct environment
+            mgr.SetArena(Mathf.Clamp(_current.ArenaIndex, 0, mgr.Arenas.Length - 1));
 
-            MelonLogger.Msg($"[BR] Starting tournament with {_current.SelectedGroups.Count} groups, {_current.ParticipantsPerGroup} participants per group");
-            tm.RunTournament();
+            if (_current.PlayMode == EPlayMode.Tournament)
+            {
+                var tm = new TournamentManager(mgr, _groups, _current);
+                MelonLogger.Msg($"[BR] Starting tournament with {_current.SelectedGroups.Count} groups, {_current.ParticipantsPerGroup} participants per group");
+                tm.RunTournament();
+            }
+            else
+            {
+                // Build a combined participant list from selected groups and run one FFA with ALL matched NPCs (ignore ParticipantsPerGroup)
+                var tm = new TournamentManager(mgr, _groups, _current);
+                var everyone = new List<NPC>();
+                for (int i = 0; i < NPCManager.NPCRegistry.Count; i++)
+                {
+                    var n = NPCManager.NPCRegistry[i];
+                    if (n == null || n.Health == null) continue;
+                    if (n.Health.IsDead || n.Health.IsKnockedOut) continue;
+                    if (mgr.IsIgnored(n.ID)) continue;
+                    for (int gi = 0; gi < _current.SelectedGroups.Count; gi++)
+                    {
+                        var def = _groups.Find(g => string.Equals(g.Name, _current.SelectedGroups[gi], StringComparison.OrdinalIgnoreCase));
+                        if (def != null && GroupConfig.IsMember(def, n))
+                        {
+                            everyone.Add(n);
+                            break;
+                        }
+                    }
+                }
+                if (everyone.Count < 2)
+                {
+                    MelonLogger.Warning("[BR] Need at least 2 participants to start an FFA");
+                    return;
+                }
+                MelonLogger.Msg($"[BR] Starting Free-For-All with {everyone.Count} participants");
+                tm.RunSingleFFARoutine(everyone);
+            }
         }
 
 

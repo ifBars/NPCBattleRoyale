@@ -19,14 +19,14 @@ namespace NPCBattleRoyale.BattleRoyale
     {
         public string Name = "Group";
         // Explicit list of NPC IDs in this group
-        public List<string> NPCIDs = new List<string>();
+        public List<string> NPCIDs = new();
         // Optional: Regions by name (e.g., "Westville", "Northtown")
         // Preferred way to group NPCs; matches NPC.Region.ToString()
-        public List<string> Regions = new List<string>();
+        public List<string> Regions = new();
         // Optional: include any NPC whose ID contains one of these case-insensitive terms
-        public List<string> IdContainsAny = new List<string>();
+        public List<string> IdContainsAny = new();
         // Optional: exclude specific NPC IDs
-        public List<string> ExcludeNPCIDs = new List<string>();
+        public List<string> ExcludeNPCIDs = new();
     }
 
     /// <summary>
@@ -87,12 +87,12 @@ namespace NPCBattleRoyale.BattleRoyale
             // Ship a few sample groups using Region names for accurate selection.
             return new List<GroupDefinition>
             {
-                new GroupDefinition { Name = "Westville", Regions = new List<string>{ "Westville" } },
-                new GroupDefinition { Name = "Northtown", Regions = new List<string>{ "Northtown" } },
-                new GroupDefinition { Name = "Downtown", Regions = new List<string>{ "Downtown" } },
-                new GroupDefinition { Name = "Docks", Regions = new List<string>{ "Docks" } },
-                new GroupDefinition { Name = "Suburbia", Regions = new List<string>{ "Suburbia" } },
-                new GroupDefinition { Name = "Uptown", Regions = new List<string>{ "Uptown" } },
+                new() { Name = "Westville", Regions = new List<string>{ "Westville" } },
+                new() { Name = "Northtown", Regions = new List<string>{ "Northtown" } },
+                new() { Name = "Downtown", Regions = new List<string>{ "Downtown" } },
+                new() { Name = "Docks", Regions = new List<string>{ "Docks" } },
+                new() { Name = "Suburbia", Regions = new List<string>{ "Suburbia" } },
+                new() { Name = "Uptown", Regions = new List<string>{ "Uptown" } },
             };
         }
 

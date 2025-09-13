@@ -13,7 +13,8 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
     {
         public override string PageTitle => "Presets";
         
-        private DropdownWrapper _presetDropdown;
+        private ToggleGroupWrapper _presetToggleGroup;
+        private readonly List<ToggleWrapper> _presetToggles = new List<ToggleWrapper>();
         private Action<int> _onPresetChanged;
         private Action _onSavePreset;
         
@@ -43,7 +44,8 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         
         private void CreateLoadSection()
         {
-            var loadRow = CreateSettingsRow(-110);
+            // Taller row to comfortably display preset toggles
+            var loadRow = CreateSettingsRow(-110, 200f);
             
             UI.Text(loadRow.RectTransform)
                 .SetContent("Load Preset:")
@@ -55,33 +57,38 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                 .SetWidth(120)
                 .Build();
             
-            _presetDropdown = UI.Dropdown(loadRow.RectTransform)
-                .SetSize(250, 35)
+            _presetToggleGroup = UI.ToggleGroup(loadRow.RectTransform)
                 .SetAnchor(0f, 0.5f)
                 .SetPivot(0f, 0.5f)
                 .SetPosition(150, 0)
-                .SetOptions(GetPresetNames())
-                .OnValueChanged(index => _onPresetChanged?.Invoke(index))
+                .SetSize(700, 180) // Wider area on larger page
                 .Build();
+
+            BuildPresetToggles();
             
             var loadBtn = UI.Button(loadRow.RectTransform)
                 .SetText("Load")
                 .SetSize(80, 35)
                 .SetAnchor(0f, 0.5f)
                 .SetPivot(0f, 0.5f)
-                .SetPosition(420, 0)
+                .SetPosition(880, 0)
                 .SetColors(
                     new Color(0.3f, 0.6f, 0.9f, 1f),
                     new Color(0.4f, 0.7f, 1f, 1f),
                     new Color(0.2f, 0.5f, 0.8f, 1f),
                     Color.gray)
                 .Build();
-            loadBtn.OnClick += () => _onPresetChanged?.Invoke(_presetDropdown.Value);
+            loadBtn.OnClick += () =>
+            {
+                int idx = GetSelectedPresetIndex();
+                if (idx >= 0) _onPresetChanged?.Invoke(idx);
+            };
         }
         
         private void CreateSaveSection()
         {
-            var saveRow = CreateSettingsRow(-180);
+            // Place below the taller load row (200px) with extra spacing
+            var saveRow = CreateSettingsRow(-340);
             
             UI.Text(saveRow.RectTransform)
                 .SetContent("Save Current as Preset:")
@@ -116,17 +123,50 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                 .SetColor(new Color(0.6f, 0.8f, 1f, 1f))
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
-                .SetPosition(0, -250)
-                .SetWidth(780)
+                .SetPosition(0, -500)
+                .SetWidth(980)
                 .Build();
         }
         
         public void RefreshPresetDropdown()
         {
-            if (_presetDropdown != null)
+            BuildPresetToggles();
+        }
+
+        private void BuildPresetToggles()
+        {
+            if (_presetToggleGroup == null) return;
+
+            // Clear existing children
+            for (int i = _presetToggleGroup.RectTransform.childCount - 1; i >= 0; i--)
+                UnityEngine.Object.DestroyImmediate(_presetToggleGroup.RectTransform.GetChild(i).gameObject);
+            _presetToggles.Clear();
+
+            var names = GetPresetNames();
+            for (int i = 0; i < names.Count; i++)
             {
-                _presetDropdown.SetOptions(GetPresetNames());
+                int idx = i;
+                var t = _presetToggleGroup.AddToggle(names[i]);
+                t.IsOn = false;
+                t.OnValueChanged += on =>
+                {
+                    if (!on) return;
+                    // Radio behavior
+                    for (int j = 0; j < _presetToggles.Count; j++)
+                        if (j != idx && _presetToggles[j].IsOn) _presetToggles[j].IsOn = false;
+                    _onPresetChanged?.Invoke(idx);
+                };
+                _presetToggles.Add(t);
             }
+        }
+
+        private int GetSelectedPresetIndex()
+        {
+            for (int i = 0; i < _presetToggles.Count; i++)
+            {
+                if (_presetToggles[i].IsOn) return i;
+            }
+            return -1;
         }
         
         private List<string> GetPresetNames()

@@ -27,6 +27,12 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         protected PanelWrapper PagePanel { get; private set; }
         
         /// <summary>
+        /// Parent transform to use when adding page controls. Defaults to the page panel.
+        /// Pages can change this to point at a scroll view content transform.
+        /// </summary>
+        protected RectTransform ContentParent { get; private set; }
+        
+        /// <summary>
         /// Whether the page is currently visible.
         /// </summary>
         public bool IsVisible { get; protected set; }
@@ -72,12 +78,15 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
             
             // Create the main panel for this page
             PagePanel = UI.Panel(parent)
-                .SetSize(860, 470)
+                .SetSize(1040, 650)
                 .SetAnchor(0.5f, 0.5f)
                 .SetPivot(0.5f, 0.5f)
                 .SetPosition(0, 0)
                 .SetBackgroundColor(new Color(0.12f, 0.13f, 0.16f, 0.9f))
                 .Build();
+            
+            // Default content parent is the page panel itself
+            ContentParent = PagePanel.RectTransform;
             
             // Create page content
             SetupUI();
@@ -146,7 +155,7 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         /// </summary>
         protected void CreateSectionHeader(string text, float yPosition)
         {
-            UI.Text(PagePanel.RectTransform)
+            UI.Text(ContentParent)
                 .SetContent(text)
                 .SetFontSize(24)
                 .SetFontStyle(FontStyle.Bold)
@@ -162,14 +171,14 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         /// </summary>
         protected void CreateDescription(string text, float yPosition)
         {
-            UI.Text(PagePanel.RectTransform)
+            UI.Text(ContentParent)
                 .SetContent(text)
                 .SetFontSize(16)
                 .SetColor(new Color(0.6f, 0.6f, 0.7f, 1f))
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
                 .SetPosition(0, yPosition)
-                .SetWidth(800)
+                .SetWidth(1000)
                 .Build();
         }
         
@@ -178,13 +187,22 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         /// </summary>
         protected PanelWrapper CreateSettingsRow(float yPosition, float height = 50f)
         {
-            return UI.Panel(PagePanel.RectTransform)
-                .SetSize(800, height)
+            return UI.Panel(ContentParent)
+                .SetSize(1000, height)
                 .SetAnchor(0.5f, 1f)
                 .SetPivot(0.5f, 1f)
                 .SetPosition(0, yPosition)
                 .SetBackgroundColor(new Color(0.18f, 0.2f, 0.24f, 0.6f))
                 .Build();
+        }
+
+        /// <summary>
+        /// Sets the parent transform for subsequent controls on this page.
+        /// </summary>
+        /// <param name="parent">The new parent transform to use.</param>
+        protected void SetContentParent(RectTransform parent)
+        {
+            ContentParent = parent;
         }
         
         /// <summary>
