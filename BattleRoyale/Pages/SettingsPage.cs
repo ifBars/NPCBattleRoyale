@@ -17,7 +17,7 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
 		private const float Column1LabelX = 24f;
 		private const float Column1ControlX = 260f;
 		private const float Column1DescX = 320f;
-		private const float Column2LabelX = 540f;
+		private const float Column2LabelX = 530f;
 		private const float Column2ControlX = 700f;
         
         private ToggleWrapper _shuffleToggle;
@@ -314,7 +314,7 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                 .SetAnchor(0f, 0.5f)
                 .SetPivot(0f, 0.5f)
                 .SetPosition(Column2LabelX, 0)
-                .SetWidth(230)
+                .SetWidth(250)
                 .Build();
 
             _maxFfaSlider = UI.Slider(advRow.RectTransform)

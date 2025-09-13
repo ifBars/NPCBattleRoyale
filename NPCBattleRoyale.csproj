@@ -911,6 +911,10 @@
 	  <Compile Include="Core.cs" />
 	  <Compile Include="Integrations\HarmonyPatches.cs" />
 	  <Compile Include="Utils\Constants.cs" />
+	  <Compile Include="Utils\CrossType.cs" />
+	  <Compile Include="Utils\EventUtils.cs" />
+	  <Compile Include="Utils\Il2CppListExtensions.cs" />
+	  <Compile Include="Utils\JsonUtils.cs" />
 	</ItemGroup>
 	<ItemGroup>
 	  <Reference Include="bGUI">

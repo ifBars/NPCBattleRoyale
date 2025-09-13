@@ -1,11 +1,12 @@
 using MelonLoader;
 using UnityEngine;
 using System.Collections;
-
 #if MONO
 using ScheduleOne.NPCs;
+using S1Behaviour = ScheduleOne.NPCs.Behaviour;
 #else
 using Il2CppScheduleOne.NPCs;
+using S1Behaviour = Il2CppScheduleOne.NPCs.Behaviour;
 #endif
 
 namespace NPCBattleRoyale.BattleRoyale
@@ -278,7 +279,7 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null)
                 {
                     npc.Behaviour.ScheduleManager.DisableSchedule();
-                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    var schedBehaviours = npc.GetComponentsInChildren<S1Behaviour.ScheduleBehaviour>(includeInactive: true);
                     for (int s = 0; s < schedBehaviours.Length; s++)
                     {
                         schedBehaviours[s].Disable_Networked(null);
@@ -365,7 +366,7 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (npc.Behaviour != null && npc.Behaviour.ScheduleManager != null)
                 {
                     npc.Behaviour.ScheduleManager.DisableSchedule();
-                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    var schedBehaviours = npc.GetComponentsInChildren<S1Behaviour.ScheduleBehaviour>(includeInactive: true);
                     for (int s = 0; s < schedBehaviours.Length; s++)
                     {
                         schedBehaviours[s].Disable_Networked(null);

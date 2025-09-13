@@ -1,8 +1,13 @@
 using UnityEngine;
 using bGUI.Components;
-using System;
-using System.Collections.Generic;
 using bGUI;
+using MelonLoader;
+using MelonLoader.Utils;
+#if MONO
+using Newtonsoft.Json;
+#else
+using Il2CppNewtonsoft.Json;
+#endif
 
 namespace NPCBattleRoyale.BattleRoyale.Pages
 {
@@ -112,7 +117,18 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                     new Color(0.1f, 0.6f, 0.2f, 1f),
                     Color.gray)
                 .Build();
-            saveBtn.OnClick += () => _onSavePreset?.Invoke();
+            saveBtn.OnClick += () =>
+            {
+                try
+                {
+                    SaveCurrentPresetToDisk();
+                    _onSavePreset?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Warning($"[BR] Failed to save preset: {ex}");
+                }
+            };
         }
         
         private void CreateInfoSection()
@@ -154,6 +170,8 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
                     // Radio behavior
                     for (int j = 0; j < _presetToggles.Count; j++)
                         if (j != idx && _presetToggles[j].IsOn) _presetToggles[j].IsOn = false;
+                    // Load preset from disk as source of truth
+                    TryLoadPresetFromDisk(names[idx]);
                     _onPresetChanged?.Invoke(idx);
                 };
                 _presetToggles.Add(t);
@@ -171,15 +189,95 @@ namespace NPCBattleRoyale.BattleRoyale.Pages
         
         private List<string> GetPresetNames()
         {
-            var list = new List<string>();
-            for (int i = 0; i < Presets.Count; i++) 
-                list.Add(Presets[i].PresetName);
-            return list;
+            try
+            {
+                EnsurePresetDir();
+                var files = Directory.GetFiles(PresetDir, "*.json", SearchOption.TopDirectoryOnly);
+                var list = new List<string>();
+                for (int i = 0; i < files.Length; i++)
+                {
+                    list.Add(Path.GetFileNameWithoutExtension(files[i]));
+                }
+                if (list.Count == 0)
+                {
+                    // fall back to in-memory presets if none saved yet
+                    for (int i = 0; i < Presets.Count; i++) list.Add(Presets[i].PresetName);
+                }
+                return list;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[BR] Failed to get preset names: {ex}");
+                var list = new List<string>();
+                for (int i = 0; i < Presets.Count; i++) list.Add(Presets[i].PresetName);
+                return list;
+            }
         }
         
         protected override void RefreshUI()
         {
             RefreshPresetDropdown();
+        }
+
+        private static string PresetDir => Path.Combine(MelonEnvironment.UserDataDirectory, "NPCBattleRoyale", "Presets");
+
+        private static void EnsurePresetDir()
+        {
+            if (!Directory.Exists(PresetDir)) Directory.CreateDirectory(PresetDir);
+        }
+
+        private void SaveCurrentPresetToDisk()
+        {
+            EnsurePresetDir();
+            var name = string.IsNullOrWhiteSpace(CurrentSettings.PresetName) ? $"Preset_{DateTime.Now:yyyyMMdd_HHmmss}" : CurrentSettings.PresetName;
+            var path = Path.Combine(PresetDir, Sanitize(name) + ".json");
+            var json = NPCBattleRoyale.Utils.JsonUtils.Serialize(CurrentSettings, true);
+            File.WriteAllText(path, json);
+        }
+
+        private void TryLoadPresetFromDisk(string presetName)
+        {
+            try
+            {
+                EnsurePresetDir();
+                var path = Path.Combine(PresetDir, Sanitize(presetName) + ".json");
+                if (!File.Exists(path)) return;
+                var json = File.ReadAllText(path);
+                var loaded = NPCBattleRoyale.Utils.JsonUtils.Deserialize<RoundSettings>(json);
+                if (loaded == null) return;
+                // Copy fields into CurrentSettings
+                CopySettings(loaded, CurrentSettings);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Warning($"[BR] Failed to load preset '{presetName}': {ex}");
+            }
+        }
+
+        private static void CopySettings(RoundSettings from, RoundSettings to)
+        {
+            to.PresetName = from.PresetName;
+            to.ArenaIndex = from.ArenaIndex;
+            to.SelectedGroups = new List<string>(from.SelectedGroups ?? new List<string>());
+            to.ParticipantsPerGroup = from.ParticipantsPerGroup;
+            to.ShuffleParticipants = from.ShuffleParticipants;
+            to.KnockoutCountsAsElim = from.KnockoutCountsAsElim;
+            to.MatchTimeoutSeconds = from.MatchTimeoutSeconds;
+            to.FinalsParticipants = from.FinalsParticipants;
+            to.PlayMode = from.PlayMode;
+            to.TournamentMode = from.TournamentMode;
+            to.ArenaRotation = from.ArenaRotation;
+            to.AdvancePerGroup = from.AdvancePerGroup;
+            to.MaxFFASize = from.MaxFFASize;
+            to.HealBetweenRounds = from.HealBetweenRounds;
+            to.InterRoundDelaySeconds = from.InterRoundDelaySeconds;
+            to.IncludePolice = from.IncludePolice;
+        }
+
+        private static string Sanitize(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+            return name.Trim();
         }
     }
 }

@@ -1,25 +1,32 @@
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.AI;
-using UnityEngine.Events;
 using UnityEngine.UI;
 #if MONO
 using ScheduleOne.NPCs;
+using S1Behaviour = ScheduleOne.NPCs.Behaviour;
 using ScheduleOne.DevUtilities;
 using ScheduleOne.Interaction;
 using ScheduleOne.PlayerScripts;
 using ScheduleOne.Police;
+using ScheduleOne.Combat;
 #else
+using Il2CppInterop.Runtime.Attributes;
 using Il2CppScheduleOne.NPCs;
+using S1Behaviour = Il2CppScheduleOne.NPCs.Behaviour;
 using Il2CppScheduleOne.DevUtilities;
 using Il2CppScheduleOne.Interaction;
 using Il2CppScheduleOne.PlayerScripts;
 using Il2CppScheduleOne.Combat;
 using Il2CppScheduleOne.Police;
 #endif
+using NPCBattleRoyale.Utils;
 
 namespace NPCBattleRoyale.BattleRoyale
 {
+#if IL2CPP
+    [RegisterTypeInIl2Cpp]
+#endif
     public class BattleRoyaleManager : MonoBehaviour
     {
         public static BattleRoyaleManager Instance { get; private set; }
@@ -58,8 +65,8 @@ namespace NPCBattleRoyale.BattleRoyale
         private readonly List<NPC> _roundNPCs = new();
         private readonly List<GameObject> _gates = new();
         private GameObject _panelRoot;
-        private readonly Dictionary<NPC, UnityAction> _deathHandlers = new();
-        private readonly Dictionary<NPC, UnityAction> _koHandlers = new();
+        private readonly Dictionary<NPC, Action> _deathHandlers = new();
+        private readonly Dictionary<NPC, Action> _koHandlers = new();
         private readonly List<NPC> _stagedWinners = new();
         private readonly HashSet<NPC> _activeParticipants = new();
         public bool ExternalControlActive { get; private set; }
@@ -211,7 +218,7 @@ namespace NPCBattleRoyale.BattleRoyale
                 {
                     npc.Behaviour.ScheduleManager.DisableSchedule();
                     // Also disable any ScheduleBehaviour so it cannot re-enable schedules during the round
-                    var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                    var schedBehaviours = npc.GetComponentsInChildren<S1Behaviour.ScheduleBehaviour>(includeInactive: true);
                     for (int s = 0; s < schedBehaviours.Length; s++)
                     {
                         schedBehaviours[s].Disable_Networked(null);
@@ -266,6 +273,9 @@ namespace NPCBattleRoyale.BattleRoyale
         /// <summary>
         /// Set the explicit list of active participants for pairing/aggression.
         /// </summary>
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         public void SetActiveParticipants(IEnumerable<NPC> participants)
         {
             _activeParticipants.Clear();
@@ -279,6 +289,9 @@ namespace NPCBattleRoyale.BattleRoyale
 
         public void SetExternalControl(bool active) => ExternalControlActive = active;
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         public List<NPC> GetActiveParticipantsAlive()
         {
             var alive = new List<NPC>();
@@ -326,6 +339,9 @@ namespace NPCBattleRoyale.BattleRoyale
             SetGatesActive(!anyActive);
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private List<NPC> GetAllNPCs()
         {
             // Prefer global registry for reliability — filter ignored IDs
@@ -339,6 +355,9 @@ namespace NPCBattleRoyale.BattleRoyale
             return list;
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private List<NPC> GetAllNPCsAlive()
         {
             var result = new List<NPC>();
@@ -517,6 +536,9 @@ namespace NPCBattleRoyale.BattleRoyale
         /// <summary>
         /// Compute a staging position around the arena for winners to wait safely.
         /// </summary>
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         public Vector3 GetStagingPosition(ArenaDefinition arena, int index)
         {
             float radius = Mathf.Max(3f, arena.Radius * 1.8f);
@@ -562,7 +584,7 @@ namespace NPCBattleRoyale.BattleRoyale
             npc.Behaviour.ScheduleManager.ScheduleEnabled = false;
             npc.Behaviour.ScheduleManager.DisableSchedule();
             // Explicitly disable any ScheduleBehaviour components so they cannot re-enable schedules
-            var scheduleBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+            var scheduleBehaviours = npc.GetComponentsInChildren<S1Behaviour.ScheduleBehaviour>(includeInactive: true);
             for (int i = 0; i < scheduleBehaviours.Length; i++)
             {
                 SafeDisable(scheduleBehaviours[i]);
@@ -603,7 +625,7 @@ namespace NPCBattleRoyale.BattleRoyale
             if (npc.Behaviour.CombatBehaviour == null)
             {
                 // Attempt to find a CombatBehaviour component in children (include inactive)
-                var cbs = npc.GetComponentsInChildren<ScheduleOne.Combat.CombatBehaviour>(includeInactive: true);
+                var cbs = npc.GetComponentsInChildren<CombatBehaviour>(includeInactive: true);
                 if (cbs != null && cbs.Length > 0)
                 {
                     npc.Behaviour.CombatBehaviour = cbs[0];
@@ -637,7 +659,7 @@ namespace NPCBattleRoyale.BattleRoyale
                     {
                         npc.Behaviour.ScheduleManager.EnableSchedule();
                         // Re-enable ScheduleBehaviour components that were disabled at round start
-                        var schedBehaviours = npc.GetComponentsInChildren<ScheduleOne.NPCs.Behaviour.ScheduleBehaviour>(includeInactive: true);
+                        var schedBehaviours = npc.GetComponentsInChildren<S1Behaviour.ScheduleBehaviour>(includeInactive: true);
                         for (int s = 0; s < schedBehaviours.Length; s++)
                         {
                             schedBehaviours[s].Enable_Networked(null);
@@ -654,7 +676,7 @@ namespace NPCBattleRoyale.BattleRoyale
             UnsubscribeAll();
         }
 
-        private void SafeDisable(ScheduleOne.NPCs.Behaviour.Behaviour beh)
+        private void SafeDisable(S1Behaviour.Behaviour beh)
         {
             if (beh != null)
             {
@@ -674,14 +696,14 @@ namespace NPCBattleRoyale.BattleRoyale
             if (npc == null || npc.Health == null) return;
             if (!_deathHandlers.ContainsKey(npc))
             {
-                UnityAction a = () => OnNPCEliminated(npc);
-                npc.Health.onDie.AddListener(a);
+                Action a = () => OnNPCEliminated(npc);
+                EventUtils.AddListener(a, npc.Health.onDie);
                 _deathHandlers[npc] = a;
             }
             if (!_koHandlers.ContainsKey(npc))
             {
-                UnityAction a = () => OnNPCEliminated(npc);
-                npc.Health.onKnockedOut.AddListener(a);
+                Action a = () => OnNPCEliminated(npc);
+                EventUtils.AddListener(a, npc.Health.onKnockedOut);
                 _koHandlers[npc] = a;
             }
         }
@@ -690,11 +712,11 @@ namespace NPCBattleRoyale.BattleRoyale
         {
             foreach (var kv in _deathHandlers)
             {
-                if (kv.Key != null && kv.Key.Health != null) kv.Key.Health.onDie.RemoveListener(kv.Value);
+                if (kv.Key != null && kv.Key.Health != null) EventUtils.RemoveListener(kv.Value, kv.Key.Health.onDie);
             }
             foreach (var kv in _koHandlers)
             {
-                if (kv.Key != null && kv.Key.Health != null) kv.Key.Health.onKnockedOut.RemoveListener(kv.Value);
+                if (kv.Key != null && kv.Key.Health != null) EventUtils.RemoveListener(kv.Value, kv.Key.Health.onKnockedOut);
             }
             _deathHandlers.Clear();
             _koHandlers.Clear();
@@ -754,7 +776,11 @@ namespace NPCBattleRoyale.BattleRoyale
             _toastText.fontSize = 36;
             _toastText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             _toastText.text = string.Empty;
+#if MONO
             var rt = (RectTransform)textGO.transform;
+#else
+            var rt = textGO.transform.Cast<RectTransform>();
+#endif
             rt.anchorMin = new Vector2(0.5f, 0.9f);
             rt.anchorMax = new Vector2(0.5f, 0.9f);
             rt.pivot = new Vector2(0.5f, 0.5f);
@@ -769,14 +795,17 @@ namespace NPCBattleRoyale.BattleRoyale
             EnsureToastUI();
             if (_toastRoutine != null)
             {
-                StopCoroutine(_toastRoutine);
+                MelonCoroutines.Stop(_toastRoutine);
                 _toastRoutine = null;
             }
             _toastText.text = string.IsNullOrEmpty(winnerName) ? "Winner: None" : $"Winner: {winnerName}";
             _toastCanvas.gameObject.SetActive(true);
-            _toastRoutine = StartCoroutine(HideToastAfter(seconds));
+            _toastRoutine = (Coroutine)MelonCoroutines.Start(HideToastAfter(seconds));
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private System.Collections.IEnumerator HideToastAfter(float seconds)
         {
             yield return new WaitForSeconds(seconds);
@@ -787,6 +816,9 @@ namespace NPCBattleRoyale.BattleRoyale
             _toastRoutine = null;
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private void SpawnGates(ArenaDefinition arena)
         {
             for (int i = 0; i < arena.GateLocalPositions.Length; i++)
@@ -825,6 +857,9 @@ namespace NPCBattleRoyale.BattleRoyale
             }
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private void SpawnControlPanel(ArenaDefinition arena)
         {
             _panelRoot = new GameObject("BR_ControlPanel");
@@ -843,6 +878,9 @@ namespace NPCBattleRoyale.BattleRoyale
             });
         }
 
+#if IL2CPP
+        [HideFromIl2Cpp]
+#endif
         private void CreateButton(Transform parent, Vector3 localPos, string label, Action onPress)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -861,13 +899,13 @@ namespace NPCBattleRoyale.BattleRoyale
             var interact = go.AddComponent<InteractableObject>();
             interact.SetMessage(label);
             interact.SetInteractionType(InteractableObject.EInteractionType.Key_Press);
-            // Wire up interaction
-            UnityAction action = () =>
+            // Wire up interaction (IL2CPP-safe)
+            Action action = () =>
             {
                 try { onPress?.Invoke(); }
                 catch (Exception ex) { MelonLogger.Warning($"[BR] Control action error: {ex}"); }
             };
-            interact.onInteractStart.AddListener(action);
+            EventUtils.AddListener(action, interact.onInteractStart);
         }
     }
 }

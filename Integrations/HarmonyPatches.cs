@@ -1,10 +1,11 @@
 ﻿using HarmonyLib;
 using NPCBattleRoyale.BattleRoyale;
-using FishNet.Connection;
 #if MONO
+using FishNet.Connection;
 using ScheduleOne.NPCs;
 using BehaviourType = ScheduleOne.NPCs.Behaviour.Behaviour;
 #else
+using Il2CppFishNet.Connection;
 using Il2CppScheduleOne.NPCs;
 using BehaviourType = Il2CppScheduleOne.NPCs.Behaviour.Behaviour;
 #endif

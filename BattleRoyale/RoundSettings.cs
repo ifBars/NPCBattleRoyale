@@ -1,5 +1,9 @@
 using MelonLoader;
+#if MONO
 using Newtonsoft.Json;
+#else
+using Il2CppNewtonsoft.Json;
+#endif
 using UnityEngine;
 
 namespace NPCBattleRoyale.BattleRoyale
@@ -60,12 +64,12 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (!File.Exists(PresetsFilePath))
                 {
                     var defaults = CreateDefaultPresets();
-                    var json = JsonConvert.SerializeObject(defaults, Formatting.Indented);
+                    var json = Utils.JsonUtils.Serialize(defaults, true);
                     File.WriteAllText(PresetsFilePath, json);
                     return defaults;
                 }
                 var text = File.ReadAllText(PresetsFilePath);
-                var list = JsonConvert.DeserializeObject<List<RoundSettings>>(text) ?? CreateDefaultPresets();
+                var list = Utils.JsonUtils.Deserialize<List<RoundSettings>>(text) ?? CreateDefaultPresets();
                 // Back-compat: ensure new fields are initialized
                 for (int i = 0; i < list.Count; i++)
                 {
@@ -88,7 +92,7 @@ namespace NPCBattleRoyale.BattleRoyale
             try
             {
                 if (!Directory.Exists(ConfigDirectory)) Directory.CreateDirectory(ConfigDirectory);
-                var json = JsonConvert.SerializeObject(presets, Formatting.Indented);
+                var json = Utils.JsonUtils.Serialize(presets, true);
                 File.WriteAllText(PresetsFilePath, json);
             }
             catch (Exception ex)

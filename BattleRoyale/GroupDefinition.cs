@@ -1,12 +1,13 @@
 using MelonLoader;
 using MelonLoader.Utils;
-using Newtonsoft.Json;
-
 #if MONO
+using Newtonsoft.Json;
 using ScheduleOne.NPCs;
 #else
+using Il2CppNewtonsoft.Json;
 using Il2CppScheduleOne.NPCs;
 #endif
+using NPCBattleRoyale.Utils;
 
 namespace NPCBattleRoyale.BattleRoyale
 {
@@ -55,14 +56,14 @@ namespace NPCBattleRoyale.BattleRoyale
                 if (!File.Exists(GroupsFilePath))
                 {
                     var defaults = CreateDefaultGroups();
-                    var json = JsonConvert.SerializeObject(defaults, Formatting.Indented);
+                    var json = JsonUtils.Serialize(defaults, true);
                     File.WriteAllText(GroupsFilePath, json);
                     return defaults;
                 }
                 else
                 {
                     var json = File.ReadAllText(GroupsFilePath);
-                    var groups = JsonConvert.DeserializeObject<List<GroupDefinition>>(json);
+                    var groups = JsonUtils.Deserialize<List<GroupDefinition>>(json);
                     groups = groups ?? new List<GroupDefinition>();
                     // Back-compat: ensure Regions list exists
                     for (int i = 0; i < groups.Count; i++)
